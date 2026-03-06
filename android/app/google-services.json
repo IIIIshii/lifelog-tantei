@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "623797177770",
+    "project_id": "nikki-next",
+    "storage_bucket": "nikki-next.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:623797177770:android:afcb11e66000dd1ecb2fd3",
+        "android_client_info": {
+          "package_name": "com.example.nikkinext"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBszVIDzf_vd2IB6DhHmdr-VI-H33Ions8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
