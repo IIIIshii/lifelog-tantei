@@ -9,8 +9,13 @@ flutter + firebase
 
 ## Android Studioから行う場合
 
+# Issue管理
+・まずIssueを立ててからパッチする
+・Issueに取り組む場合はassigneeに自分を追加するように注意
 
 # 注意点
-pubspec.yamlで必要なパッケージ(?)とかを追加したあとは、必ずターミナルで
+・pubspec.yamlで必要なパッケージ(?)とかを追加したあとは、必ずターミナルで
 flutter get pub
 を叩くこと
+
+・.envにキーを入れる
