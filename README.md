@@ -1,17 +1,16 @@
-# nikkinext
+flutter + firebase
+書き方わからないので適当
 
-A new Flutter project.
+# デバッグ
+## VS Codeから行う場合
+・右下のバーからエミュレータデバイスを選択
+・lib/main.dart ファイルを開いた状態で、キーボードの F5 キーを押す
+    ・メニューからRun → Start Debugging でもいける
 
-## Getting Started
+## Android Studioから行う場合
 
-This project is a starting point for a Flutter application.
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+# 注意点
+pubspec.yamlで必要なパッケージ(?)とかを追加したあとは、必ずターミナルで
+flutter get pub
+を叩くこと
