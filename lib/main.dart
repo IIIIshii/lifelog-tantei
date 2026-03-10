@@ -7,9 +7,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
   await dotenv.load(fileName: ".env");
-  // Flutterの初期化を確実に行う
   WidgetsFlutterBinding.ensureInitialized();
-  // Firebaseの初期化
   await Firebase.initializeApp();
   runApp(const MyApp());
 }
@@ -20,153 +18,384 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '天気日記アプリ',
+      title: 'NikkiNext',
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: const WeatherQuestionPage(),
+      home: const DiaryPage(),
     );
   }
 }
 
-class WeatherQuestionPage extends StatefulWidget {
-  const WeatherQuestionPage({super.key});
+class DiaryPage extends StatefulWidget {
+  const DiaryPage({super.key});
 
   @override
-  State<WeatherQuestionPage> createState() => _WeatherQuestionPageState();
+  State<DiaryPage> createState() => _DiaryPageState();
 }
 
-class _WeatherQuestionPageState extends State<WeatherQuestionPage> {
-  String aiResponse = ""; // AIの返信を保存する変数
-  bool isLoading = false; // 通信中かどうか
+class _DiaryPageState extends State<DiaryPage> {
+  String? _uid;
+  String? _today;
+  int _conversationOrder = 0;
+  final List<Map<String, String>> _messages = [];
+  String? _diary;
+  bool _isLoading = false;
+  bool _diaryGenerated = false;
+  final TextEditingController _textController = TextEditingController();
+  late final GenerativeModel _model;
 
-// Geminiと対話する関数
-  Future<void> _getAiComment(String weather) async {
-    setState(() => isLoading = true);
+  @override
+  void initState() {
+    super.initState();
+    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+    _model = GenerativeModel(model: 'gemini-2.5-flash', apiKey: apiKey);
+    _initSession();
+  }
 
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
+
+  // 匿名ログイン・日付設定・最初の質問生成
+  Future<void> _initSession() async {
+    setState(() => _isLoading = true);
     try {
-      // 1. まずキーを取り出す（nullなら空文字を入れる）
-      final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+      final credential = await FirebaseAuth.instance.signInAnonymously();
+      _uid = credential.user?.uid;
+      _today = DateTime.now().toIso8601String().split('T')[0];
+      await _startConversation();
+    } catch (e) {
+      _showError('初期化エラー: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
 
-      if (apiKey.isEmpty) {
-        // キーがない場合の処理（デバッグ時に気づけるようにする）
-        print('エラー: APIキーが設定されていません。.envファイルを確認してください。');
-        return;
-      }
+  // AIが最初の質問を生成
+  Future<void> _startConversation() async {
+    final response = await _model.generateContent([
+      Content.text('今日の日記を書くためのインタビューをします。ユーザーに今日の出来事について、親しみやすく短い質問を1つだけしてください。'),
+    ]);
+    final question = response.text ?? '今日はどんな一日でしたか？';
+    await _saveMessage('ai', question);
+    setState(() => _messages.add({'role': 'ai', 'text': question}));
+  }
 
-      // 2. モデルを初期化
-      final model = GenerativeModel(
-        model: 'gemini-2.5-flash', 
-        apiKey: apiKey,
-      );
+  // ユーザーの回答を受け取り、深堀りor日記生成フェーズへ
+  Future<void> _sendUserReply(String text) async {
+    if (text.trim().isEmpty) return;
+    _textController.clear();
 
-      // 2. プロンプト（AIへの命令）を作成
-      final prompt = "私は今日の日記を書いています。今日の天気は「$weather」です。これに対して、前向きになれるような短い一言メッセージを1つだけ返してください。";
+    await _saveMessage('user', text);
+    setState(() => _messages.add({'role': 'user', 'text': text}));
 
-      // 3. AIに送信
-      final response = await model.generateContent([Content.text(prompt)]);
-      
+    final userReplyCount = _messages.where((m) => m['role'] == 'user').length;
+    if (userReplyCount < 2) {
+      await _askFollowUp();
+    } else {
+      setState(() {}); // 日記生成ボタンを表示
+    }
+  }
+
+  // 深堀り質問を生成
+  Future<void> _askFollowUp() async {
+    setState(() => _isLoading = true);
+    try {
+      final history = _messages
+          .map((m) => '${m['role'] == 'ai' ? 'AI' : 'ユーザー'}: ${m['text']}')
+          .join('\n');
+      final prompt = '以下は日記インタビューの会話です:\n$history\n\nユーザーの回答に対して、もう少し詳しく聞く自然な深堀り質問を1つだけしてください。';
+      final response = await _model.generateContent([Content.text(prompt)]);
+      final followUp = response.text ?? 'もう少し詳しく教えてください。';
+      await _saveMessage('ai', followUp);
+      setState(() => _messages.add({'role': 'ai', 'text': followUp}));
+    } catch (e) {
+      _showError('AIエラー: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // 会話履歴から日記を生成してFirestoreに保存
+  Future<void> _generateDiary() async {
+    setState(() => _isLoading = true);
+    try {
+      final history = _messages
+          .map((m) => '${m['role'] == 'ai' ? 'AI' : 'ユーザー'}: ${m['text']}')
+          .join('\n');
+      final prompt = '以下の会話を元に、ユーザーの視点で100〜300字の自然な日記を生成してください。\n\n$history';
+      final response = await _model.generateContent([Content.text(prompt)]);
+      final diary = response.text ?? '日記を生成できませんでした。';
+      await _saveDiary(diary);
       setState(() {
-        aiResponse = response.text ?? "AIが言葉に詰まっているようです...";
+        _diary = diary;
+        _diaryGenerated = true;
       });
     } catch (e) {
-      setState(() => aiResponse = "エラーが発生しました: $e");
+      _showError('日記生成エラー: $e');
     } finally {
-      setState(() => isLoading = false);
+      setState(() => _isLoading = false);
     }
   }
 
-
-  // 匿名ログインを実行し、ユーザーIDを取得する関数
-  Future<String?> _signInAnonymously() async {
-    final userCredential = await FirebaseAuth.instance.signInAnonymously();
-    return userCredential.user?.uid;
-  }
-
-  // 天気データをFirestoreに保存する関数
-  Future<void> _saveWeather(String weather) async {
-  print('--- 保存処理を開始しました ---'); // 追加
-  try {
-    print('匿名認証を試みています...'); // 追加
-    final uid = await _signInAnonymously();
-    print('取得したUID: $uid'); // 追加
-
-    if (uid == null) {
-      print('UIDが取得できませんでした');
-      return;
-    }
-
-    final String today = DateTime.now().toIso8601String().split('T')[0];
-    print('保存先の日付ドキュメント: $today'); // 追加
-
+  // 会話1件をサブコレクションに保存
+  Future<void> _saveMessage(String role, String text) async {
+    if (_uid == null || _today == null) return;
     await FirebaseFirestore.instance
         .collection('users')
-        .doc(uid)
+        .doc(_uid)
         .collection('entries')
-        .doc(today)
-        .set({
-      'weather': weather,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+        .doc(_today)
+        .collection('conversation')
+        .add({
+          'role': role,
+          'text': text,
+          'order': _conversationOrder++,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+  }
 
-    print('Firestoreへの書き込みに成功しました！'); // 追加
-    _getAiComment(weather);
-    
+  // 生成した日記をentriesドキュメントに保存
+  Future<void> _saveDiary(String diary) async {
+    if (_uid == null || _today == null) return;
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(_uid)
+        .collection('entries')
+        .doc(_today)
+        .set({
+          'diary': diary,
+          'timestamp': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+  }
+
+  void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('「$weather」を保存しました！')),
-    );
-  } catch (e) {
-    print('【エラー発生】: $e'); // ここにエラー内容が出るはず
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('保存に失敗しました: $e')),
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('エラー'),
+        content: SelectableText(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+        ],
+      ),
     );
   }
-}
 
   @override
   Widget build(BuildContext context) {
+    final userReplyCount = _messages.where((m) => m['role'] == 'user').length;
+    final lastIsAI = _messages.isNotEmpty && _messages.last['role'] == 'ai';
+    final showInput = !_diaryGenerated && !_isLoading && lastIsAI;
+    final showGenerateButton = userReplyCount >= 2 && !_diaryGenerated && !_isLoading;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('今日の日記')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (isLoading) 
-              const CircularProgressIndicator() // 読み込み中のぐるぐる
-            else if (aiResponse.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Text(aiResponse, style: const TextStyle(fontSize: 16)),
-                  ),
+      appBar: AppBar(
+        title: const Text('今日の日記'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.menu_book),
+            tooltip: '過去の日記',
+            onPressed: () {
+              if (_uid == null) return;
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => DiaryListPage(uid: _uid!),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _messages.length + (_diary != null ? 1 : 0),
+              itemBuilder: (context, index) {
+                if (_diary != null && index == _messages.length) {
+                  return _diaryCard(_diary!);
+                }
+                final msg = _messages[index];
+                return _messageBubble(msg['role']!, msg['text']!);
+              },
+            ),
+          ),
+          if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.all(8.0),
+              child: CircularProgressIndicator(),
+            ),
+          if (showGenerateButton)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _generateDiary,
+                  child: const Text('日記を生成する'),
                 ),
               ),
-            const Text(
-              '今日の天気はどうですか？',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 30),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _weatherButton('はれ', Colors.orange),
-                _weatherButton('あめ', Colors.blue),
-                _weatherButton('その他', Colors.grey),
-              ],
-            ),
+          if (showInput) _inputArea(),
+        ],
+      ),
+    );
+  }
+
+  Widget _messageBubble(String role, String text) {
+    final isAI = role == 'ai';
+    return Align(
+      alignment: isAI ? Alignment.centerLeft : Alignment.centerRight,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(12),
+        constraints: const BoxConstraints(maxWidth: 280),
+        decoration: BoxDecoration(
+          color: isAI ? Colors.grey[200] : Colors.blue[100],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(text),
+      ),
+    );
+  }
+
+  Widget _diaryCard(String diary) {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      color: Colors.amber[50],
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('今日の日記', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 8),
+            Text(diary),
           ],
         ),
       ),
     );
   }
 
-  // 共通のボタンデザイン
-  Widget _weatherButton(String label, Color color) {
-    return ElevatedButton(
-      style: ElevatedButton.styleFrom(backgroundColor: color),
-      onPressed: () => _saveWeather(label),
-      child: Text(label, style: const TextStyle(color: Colors.white)),
+  Widget _inputArea() {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _textController,
+              decoration: const InputDecoration(
+                hintText: '返答を入力...',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: _sendUserReply,
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.send),
+            onPressed: () => _sendUserReply(_textController.text),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ───────────────────────────────────────────
+// 過去の日記一覧画面
+// ───────────────────────────────────────────
+
+class DiaryListPage extends StatelessWidget {
+  final String uid;
+  const DiaryListPage({super.key, required this.uid});
+
+  @override
+  Widget build(BuildContext context) {
+    final entriesRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('entries')
+        .where('diary', isNotEqualTo: null)
+        .orderBy('diary') // isNotEqualToと同フィールドのorderByが必要
+        .orderBy('timestamp', descending: true);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('過去の日記')),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: entriesRef.snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('エラー: ${snapshot.error}'));
+          }
+          final docs = snapshot.data?.docs ?? [];
+          if (docs.isEmpty) {
+            return const Center(child: Text('まだ日記がありません'));
+          }
+          return ListView.separated(
+            itemCount: docs.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final data = docs[index].data() as Map<String, dynamic>;
+              final date = docs[index].id; // ドキュメントIDが日付
+              final diary = data['diary'] as String? ?? '';
+              return ListTile(
+                leading: const Icon(Icons.book),
+                title: Text(date),
+                subtitle: Text(
+                  diary,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => DiaryDetailPage(date: date, diary: diary),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ───────────────────────────────────────────
+// 日記詳細画面
+// ───────────────────────────────────────────
+
+class DiaryDetailPage extends StatelessWidget {
+  final String date;
+  final String diary;
+  const DiaryDetailPage({super.key, required this.date, required this.diary});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(date)),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Card(
+          color: Colors.amber[50],
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Text(diary, style: const TextStyle(fontSize: 16, height: 1.8)),
+          ),
+        ),
+      ),
     );
   }
 }
