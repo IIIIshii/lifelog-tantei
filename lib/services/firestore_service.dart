@@ -1,7 +1,32 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/user_settings.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  // ユーザー設定
+
+  Future<UserSettings> getUserSettings(String uid) async {
+    final doc = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('settings')
+        .doc('preferences')
+        .get();
+    if (doc.exists && doc.data() != null) {
+      return UserSettings.fromMap(doc.data()!);
+    }
+    return UserSettings.defaults();
+  }
+
+  Future<void> saveUserSettings(String uid, UserSettings settings) async {
+    await _db
+        .collection('users')
+        .doc(uid)
+        .collection('settings')
+        .doc('preferences')
+        .set(settings.toMap());
+  }
 
   Future<String?> getTodayDiary(String uid, String date) async {
     final doc = await _db
