@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import 'diary_page.dart';
 import 'diary_list_page.dart';
+import 'settings_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -92,7 +93,10 @@ class _HomePageState extends State<HomePage> {
               title: '設定',
               subtitle: '記録したい項目を設定する',
               color: const Color(0xFF4A4A5C),
-              onTap: () => _showComingSoon(context, '設定'),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
+              ),
             ),
           ],
         ),
