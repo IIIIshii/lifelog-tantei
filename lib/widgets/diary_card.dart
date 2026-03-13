@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
+// 生成された日記を会話リストの末尾に表示するカードウィジェット
 class DiaryCard extends StatelessWidget {
-  final String diary;
+  final String diary; // 表示する日記テキスト
 
   const DiaryCard({super.key, required this.diary});
 

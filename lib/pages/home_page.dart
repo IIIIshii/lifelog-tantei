@@ -4,6 +4,7 @@ import 'diary_page.dart';
 import 'diary_list_page.dart';
 import 'settings_page.dart';
 
+// アプリのホーム画面。4つのメニューカードを表示する
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -21,6 +22,7 @@ class _HomePageState extends State<HomePage> {
     _initUid();
   }
 
+  // 匿名サインインしてUIDを取得する。UID取得前はメニューボタンを無効化する
   Future<void> _initUid() async {
     final uid = await _auth.signInAnonymously();
     setState(() => _uid = uid);
@@ -104,6 +106,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // 未実装機能のダイアログを表示する
   void _showComingSoon(BuildContext context, String feature) {
     showDialog(
       context: context,
@@ -121,6 +124,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
+// ホーム画面の各メニュー項目を表すカードウィジェット
 class _MenuCard extends StatelessWidget {
   final IconData icon;
   final String title;

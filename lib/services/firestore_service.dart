@@ -1,11 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user_settings.dart';
 
+// Firestoreへのデータ読み書きを担当するサービスクラス
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // ユーザー設定
-
+  // ユーザーの設定をFirestoreから取得する（存在しなければデフォルト値を返す）
   Future<UserSettings> getUserSettings(String uid) async {
     final doc = await _db
         .collection('users')
@@ -19,6 +19,7 @@ class FirestoreService {
     return UserSettings.defaults();
   }
 
+  // ユーザーの設定をFirestoreに保存する
   Future<void> saveUserSettings(String uid, UserSettings settings) async {
     await _db
         .collection('users')
@@ -28,6 +29,7 @@ class FirestoreService {
         .set(settings.toMap());
   }
 
+  // 指定日の日記テキストをFirestoreから取得する（未生成の場合はnullを返す）
   Future<String?> getTodayDiary(String uid, String date) async {
     final doc = await _db
         .collection('users')
@@ -41,6 +43,7 @@ class FirestoreService {
     return null;
   }
 
+  // 会話の1メッセージをFirestoreに保存する（順序orderで並び替えできるようにする）
   Future<void> saveMessage(
       String uid, String date, String role, String text, int order) async {
     await _db
@@ -57,6 +60,7 @@ class FirestoreService {
     });
   }
 
+  // 生成した日記テキストをFirestoreに保存する（既存データとマージする）
   Future<void> saveDiary(String uid, String date, String diary) async {
     await _db
         .collection('users')
@@ -69,6 +73,7 @@ class FirestoreService {
     }, SetOptions(merge: true));
   }
 
+  // 日記が存在するエントリを新しい順で取得するクエリを返す
   Query<Map<String, dynamic>> entriesQuery(String uid) {
     return _db
         .collection('users')

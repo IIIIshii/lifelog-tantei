@@ -10,8 +10,11 @@ import '../widgets/diary_card.dart';
 import '../widgets/input_area.dart';
 import 'diary_list_page.dart';
 
+// 質問フェーズを表す列挙型
+// fixed: 固定質問（設定ベース）、ai: AI質問、custom: カスタム質問、done: 全質問完了
 enum _Phase { fixed, ai, custom, done }
 
+// 今日の日記を作成するページ。AIとの対話を通じて日記を生成する
 class DiaryPage extends StatefulWidget {
   const DiaryPage({super.key});
 
@@ -21,10 +24,10 @@ class DiaryPage extends StatefulWidget {
 
 class _DiaryPageState extends State<DiaryPage> {
   String? _uid;
-  String? _today;
-  int _conversationOrder = 0;
-  final List<Map<String, String>> _messages = [];
-  String? _diary;
+  String? _today; // 今日の日付（YYYY-MM-DD形式）
+  int _conversationOrder = 0; // Firestoreに保存するメッセージの順序カウンター
+  final List<Map<String, String>> _messages = []; // 画面に表示する会話履歴
+  String? _diary; // 生成された日記テキスト
   bool _isLoading = false;
   bool _diaryGenerated = false;
   final TextEditingController _textController = TextEditingController();
@@ -34,9 +37,9 @@ class _DiaryPageState extends State<DiaryPage> {
   final FirestoreService _firestore = FirestoreService();
 
   _Phase _phase = _Phase.fixed;
-  final Queue<String> _fixedQueue = Queue();
-  final Queue<String> _customQueue = Queue();
-  int _aiExchanges = 0;
+  final Queue<String> _fixedQueue = Queue(); // 設定から生成した固定質問のキュー
+  final Queue<String> _customQueue = Queue(); // ユーザー定義のカスタム質問のキュー
+  int _aiExchanges = 0; // AIフェーズでのユーザー返答回数
 
   @override
   void initState() {
@@ -52,6 +55,7 @@ class _DiaryPageState extends State<DiaryPage> {
     super.dispose();
   }
 
+  // セッションを初期化する。今日の日記が既にあれば表示し、なければ質問を開始する
   Future<void> _initSession() async {
     setState(() => _isLoading = true);
     try {
@@ -77,9 +81,10 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
-  /// 設定から固定質問キューとカスタム質問キューを構築する
+  // ユーザー設定を元に固定質問キューとカスタム質問キューを構築する
   void _buildQueues(UserSettings settings) {
     if (settings.recallAssist) {
+      // 思い出しアシストONの場合、時間帯別の質問を3問追加する
       _fixedQueue.addAll([
         '午前中は何をしていましたか？',
         '午後は何をしていましたか？',
@@ -104,12 +109,13 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
-  /// 現在のフェーズに応じて次の質問をする
+  // 現在のフェーズに応じて次の質問をする
   Future<void> _askNext() async {
     if (_phase == _Phase.fixed) {
       if (_fixedQueue.isNotEmpty) {
         _postAiMessage(_fixedQueue.removeFirst());
       } else {
+        // 固定質問が終わったらAIフェーズへ移行する
         _phase = _Phase.ai;
         await _askAiFirst();
       }
@@ -117,18 +123,20 @@ class _DiaryPageState extends State<DiaryPage> {
       if (_customQueue.isNotEmpty) {
         _postAiMessage(_customQueue.removeFirst());
       } else {
+        // カスタム質問が終わったら完了フェーズへ移行する
         _phase = _Phase.done;
         setState(() {});
       }
     }
   }
 
-  /// 固定メッセージをAI発言としてリストに追加する（Gemini不要）
+  // Geminiを呼ばずにメッセージをAI発言としてリストとFirestoreに追加する
   void _postAiMessage(String text) {
     _firestore.saveMessage(_uid!, _today!, 'ai', text, _conversationOrder++);
     setState(() => _messages.add({'role': 'ai', 'text': text}));
   }
 
+  // AIフェーズの最初の質問をGeminiに生成させる
   Future<void> _askAiFirst() async {
     setState(() => _isLoading = true);
     try {
@@ -143,6 +151,7 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
+  // ユーザーの返答を受け取り、現在のフェーズに応じて次のアクションを決める
   Future<void> _sendUserReply(String text) async {
     if (text.trim().isEmpty) return;
     _textController.clear();
@@ -156,6 +165,7 @@ class _DiaryPageState extends State<DiaryPage> {
     } else if (_phase == _Phase.ai) {
       _aiExchanges++;
       if (_aiExchanges < 2) {
+        // AIの深堀りは最大2回まで
         await _askAiFollowUp();
       } else {
         _phase = _Phase.custom;
@@ -166,6 +176,7 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
+  // Geminiに深堀り質問を生成させる
   Future<void> _askAiFollowUp() async {
     setState(() => _isLoading = true);
     try {
@@ -180,6 +191,7 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
+  // 会話履歴全体からGeminiに日記を生成させてFirestoreに保存する
   Future<void> _generateDiary() async {
     setState(() => _isLoading = true);
     try {
@@ -196,6 +208,7 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
+  // エラーダイアログを表示する
   void _showError(String message) {
     if (!mounted) return;
     showDialog(
@@ -216,6 +229,7 @@ class _DiaryPageState extends State<DiaryPage> {
   Widget build(BuildContext context) {
     final lastIsAI = _messages.isNotEmpty && _messages.last['role'] == 'ai';
     final showInput = !_diaryGenerated && !_isLoading && lastIsAI;
+    // 全フェーズ完了かつ日記未生成の場合に生成ボタンを表示する
     final showGenerateButton =
         _phase == _Phase.done && !_diaryGenerated && !_isLoading;
 
@@ -245,6 +259,7 @@ class _DiaryPageState extends State<DiaryPage> {
               padding: const EdgeInsets.all(16),
               itemCount: _messages.length + (_diary != null ? 1 : 0),
               itemBuilder: (context, index) {
+                // 末尾に生成された日記カードを表示する
                 if (_diary != null && index == _messages.length) {
                   return DiaryCard(diary: _diary!);
                 }

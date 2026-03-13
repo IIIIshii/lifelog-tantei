@@ -1,3 +1,4 @@
+// Geminiへ投げるプロンプト文字列を一元管理するクラス。ロール変更はここだけ触ればOK
 class DiaryPrompts {
   /// 今日の出来事についての最初の質問を生成するプロンプト
   static String firstQuestion() {
