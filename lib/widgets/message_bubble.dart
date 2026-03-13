@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+// 会話の1メッセージを吹き出し形式で表示するウィジェット
+// AIは左寄せ（グレー）、ユーザーは右寄せ（ブルー）で表示する
 class MessageBubble extends StatelessWidget {
-  final String role;
+  final String role; // 'ai' または 'user'
   final String text;
 
   const MessageBubble({super.key, required this.role, required this.text});

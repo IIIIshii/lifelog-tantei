@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/firestore_service.dart';
 import 'diary_detail_page.dart';
 
+// 過去の日記一覧をリスト表示するページ
 class DiaryListPage extends StatelessWidget {
   final String uid;
 
@@ -14,6 +15,7 @@ class DiaryListPage extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('過去の日記')),
+      // Firestoreのリアルタイム更新をStreamBuilderで受け取って一覧を描画する
       body: StreamBuilder<QuerySnapshot>(
         stream: entriesRef.snapshots(),
         builder: (context, snapshot) {
@@ -32,7 +34,7 @@ class DiaryListPage extends StatelessWidget {
             separatorBuilder: (_, _) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final data = docs[index].data() as Map<String, dynamic>;
-              final date = docs[index].id;
+              final date = docs[index].id; // ドキュメントIDが日付（YYYY-MM-DD）
               final diary = data['diary'] as String? ?? '';
               return ListTile(
                 leading: const Icon(Icons.book),
@@ -42,6 +44,7 @@ class DiaryListPage extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
+                // タップで日記詳細ページへ遷移する
                 onTap: () {
                   Navigator.push(
                     context,

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
+// 特定の日の日記を全文表示する詳細ページ
 class DiaryDetailPage extends StatelessWidget {
-  final String date;
-  final String diary;
+  final String date; // 表示する日付（YYYY-MM-DD）
+  final String diary; // 表示する日記テキスト
 
   const DiaryDetailPage({super.key, required this.date, required this.diary});
 

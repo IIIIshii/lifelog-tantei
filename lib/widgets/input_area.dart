@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
+// ユーザーがテキストを入力して送信するための入力エリアウィジェット
 class InputArea extends StatelessWidget {
   final TextEditingController controller;
-  final void Function(String) onSubmit;
+  final void Function(String) onSubmit; // 送信時に呼ばれるコールバック
 
   const InputArea({super.key, required this.controller, required this.onSubmit});
 
@@ -19,7 +20,7 @@ class InputArea extends StatelessWidget {
                 hintText: '返答を入力...',
                 border: OutlineInputBorder(),
               ),
-              onSubmitted: onSubmit,
+              onSubmitted: onSubmit, // キーボードのEnterキーでも送信できる
             ),
           ),
           const SizedBox(width: 8),
