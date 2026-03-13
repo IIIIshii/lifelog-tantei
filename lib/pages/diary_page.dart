@@ -1,5 +1,7 @@
+import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
@@ -7,6 +9,8 @@ import '../widgets/message_bubble.dart';
 import '../widgets/diary_card.dart';
 import '../widgets/input_area.dart';
 import 'diary_list_page.dart';
+
+enum _Phase { fixed, ai, custom, done }
 
 class DiaryPage extends StatefulWidget {
   const DiaryPage({super.key});
@@ -28,6 +32,11 @@ class _DiaryPageState extends State<DiaryPage> {
   late final GeminiService _gemini;
   final AuthService _auth = AuthService();
   final FirestoreService _firestore = FirestoreService();
+
+  _Phase _phase = _Phase.fixed;
+  final Queue<String> _fixedQueue = Queue();
+  final Queue<String> _customQueue = Queue();
+  int _aiExchanges = 0;
 
   @override
   void initState() {
@@ -55,9 +64,12 @@ class _DiaryPageState extends State<DiaryPage> {
           _diary = existingDiary;
           _diaryGenerated = true;
         });
-      } else {
-        await _startConversation();
+        return;
       }
+
+      final settings = await _firestore.getUserSettings(_uid!);
+      _buildQueues(settings);
+      await _askNext();
     } catch (e) {
       _showError('初期化エラー: $e');
     } finally {
@@ -65,32 +77,101 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
-  Future<void> _startConversation() async {
-    final question = await _gemini.generateFirstQuestion();
-    await _firestore.saveMessage(_uid!, _today!, 'ai', question, _conversationOrder++);
-    setState(() => _messages.add({'role': 'ai', 'text': question}));
+  /// 設定から固定質問キューとカスタム質問キューを構築する
+  void _buildQueues(UserSettings settings) {
+    if (settings.recallAssist) {
+      _fixedQueue.addAll([
+        '午前中は何をしていましたか？',
+        '午後は何をしていましたか？',
+        '夜は何をしていましたか？',
+      ]);
+    }
+    if (settings.recordSleep) {
+      _fixedQueue.add('昨夜は何時間くらい眠れましたか？');
+    }
+    if (settings.recordFood) {
+      _fixedQueue.add('今日食べたものを教えてください。');
+    }
+    if (settings.recordExercise) {
+      _fixedQueue.add('今日運動しましたか？');
+    }
+    if (settings.recordStudy) {
+      _fixedQueue.add('今日の勉強内容を教えてください。');
+    }
+
+    for (final q in settings.customQuestions) {
+      _customQueue.add(q);
+    }
+  }
+
+  /// 現在のフェーズに応じて次の質問をする
+  Future<void> _askNext() async {
+    if (_phase == _Phase.fixed) {
+      if (_fixedQueue.isNotEmpty) {
+        _postAiMessage(_fixedQueue.removeFirst());
+      } else {
+        _phase = _Phase.ai;
+        await _askAiFirst();
+      }
+    } else if (_phase == _Phase.custom) {
+      if (_customQueue.isNotEmpty) {
+        _postAiMessage(_customQueue.removeFirst());
+      } else {
+        _phase = _Phase.done;
+        setState(() {});
+      }
+    }
+  }
+
+  /// 固定メッセージをAI発言としてリストに追加する（Gemini不要）
+  void _postAiMessage(String text) {
+    _firestore.saveMessage(_uid!, _today!, 'ai', text, _conversationOrder++);
+    setState(() => _messages.add({'role': 'ai', 'text': text}));
+  }
+
+  Future<void> _askAiFirst() async {
+    setState(() => _isLoading = true);
+    try {
+      final question = await _gemini.generateFirstQuestion();
+      await _firestore.saveMessage(
+          _uid!, _today!, 'ai', question, _conversationOrder++);
+      setState(() => _messages.add({'role': 'ai', 'text': question}));
+    } catch (e) {
+      _showError('AIエラー: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _sendUserReply(String text) async {
     if (text.trim().isEmpty) return;
     _textController.clear();
 
-    await _firestore.saveMessage(_uid!, _today!, 'user', text, _conversationOrder++);
+    await _firestore.saveMessage(
+        _uid!, _today!, 'user', text, _conversationOrder++);
     setState(() => _messages.add({'role': 'user', 'text': text}));
 
-    final userReplyCount = _messages.where((m) => m['role'] == 'user').length;
-    if (userReplyCount < 2) {
-      await _askFollowUp();
-    } else {
-      setState(() {});
+    if (_phase == _Phase.fixed) {
+      await _askNext();
+    } else if (_phase == _Phase.ai) {
+      _aiExchanges++;
+      if (_aiExchanges < 2) {
+        await _askAiFollowUp();
+      } else {
+        _phase = _Phase.custom;
+        await _askNext();
+      }
+    } else if (_phase == _Phase.custom) {
+      await _askNext();
     }
   }
 
-  Future<void> _askFollowUp() async {
+  Future<void> _askAiFollowUp() async {
     setState(() => _isLoading = true);
     try {
       final followUp = await _gemini.generateFollowUp(_messages);
-      await _firestore.saveMessage(_uid!, _today!, 'ai', followUp, _conversationOrder++);
+      await _firestore.saveMessage(
+          _uid!, _today!, 'ai', followUp, _conversationOrder++);
       setState(() => _messages.add({'role': 'ai', 'text': followUp}));
     } catch (e) {
       _showError('AIエラー: $e');
@@ -133,10 +214,10 @@ class _DiaryPageState extends State<DiaryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final userReplyCount = _messages.where((m) => m['role'] == 'user').length;
     final lastIsAI = _messages.isNotEmpty && _messages.last['role'] == 'ai';
     final showInput = !_diaryGenerated && !_isLoading && lastIsAI;
-    final showGenerateButton = userReplyCount >= 2 && !_diaryGenerated && !_isLoading;
+    final showGenerateButton =
+        _phase == _Phase.done && !_diaryGenerated && !_isLoading;
 
     return Scaffold(
       appBar: AppBar(
