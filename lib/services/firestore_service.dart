@@ -78,4 +78,33 @@ class FirestoreService {
         .orderBy('diary')
         .orderBy('timestamp', descending: true);
   }
+
+  Future<void> saveStats(
+      String uid, String date, Map<String, dynamic> stats) async {
+    await _db
+        .collection('users')
+        .doc(uid)
+        .collection('entries')
+        .doc(date)
+        .set({'stats': stats}, SetOptions(merge: true));
+  }
+
+  /// 直近 [days] 日分のエントリを日付昇順で返す
+  Future<List<Map<String, dynamic>>> getStatsHistory(
+      String uid, {int days = 30}) async {
+    final since = DateTime.now().subtract(Duration(days: days));
+    final sinceStr = since.toIso8601String().split('T')[0];
+    final snap = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('entries')
+        .where(FieldPath.documentId, isGreaterThanOrEqualTo: sinceStr)
+        .orderBy(FieldPath.documentId)
+        .get();
+    return snap.docs.map((d) {
+      final data = Map<String, dynamic>.from(d.data());
+      data['date'] = d.id;
+      return data;
+    }).toList();
+  }
 }

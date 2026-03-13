@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import 'activity_page.dart';
 import 'diary_page.dart';
 import 'diary_list_page.dart';
+import 'settings_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -84,7 +86,10 @@ class _HomePageState extends State<HomePage> {
               title: '活動の記録',
               subtitle: '習慣や行動をグラフで見る',
               color: const Color(0xFF2E4A5C),
-              onTap: () => _showComingSoon(context, '活動の記録'),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ActivityPage()),
+              ),
             ),
             const SizedBox(height: 16),
             _MenuCard(
@@ -92,7 +97,10 @@ class _HomePageState extends State<HomePage> {
               title: '設定',
               subtitle: '記録したい項目を設定する',
               color: const Color(0xFF4A4A5C),
-              onTap: () => _showComingSoon(context, '設定'),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
+              ),
             ),
           ],
         ),
@@ -100,21 +108,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _showComingSoon(BuildContext context, String feature) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(feature),
-        content: const Text('この機能は近日公開予定です。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
+
 }
 
 class _MenuCard extends StatelessWidget {

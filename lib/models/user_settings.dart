@@ -6,6 +6,9 @@ class UserSettings {
   final bool recordExercise;
   final bool recordStudy;
   final List<String> customQuestions;
+  final bool notificationEnabled;
+  final int notificationHour;
+  final int notificationMinute;
 
   const UserSettings({
     this.recordEvent = true,
@@ -15,6 +18,9 @@ class UserSettings {
     this.recordExercise = false,
     this.recordStudy = false,
     this.customQuestions = const [],
+    this.notificationEnabled = false,
+    this.notificationHour = 21,
+    this.notificationMinute = 0,
   });
 
   factory UserSettings.defaults() => const UserSettings();
@@ -29,6 +35,9 @@ class UserSettings {
       recordStudy: map['recordStudy'] as bool? ?? false,
       customQuestions:
           (map['customQuestions'] as List<dynamic>?)?.cast<String>() ?? [],
+      notificationEnabled: map['notificationEnabled'] as bool? ?? false,
+      notificationHour: map['notificationHour'] as int? ?? 21,
+      notificationMinute: map['notificationMinute'] as int? ?? 0,
     );
   }
 
@@ -41,6 +50,9 @@ class UserSettings {
       'recordExercise': recordExercise,
       'recordStudy': recordStudy,
       'customQuestions': customQuestions,
+      'notificationEnabled': notificationEnabled,
+      'notificationHour': notificationHour,
+      'notificationMinute': notificationMinute,
     };
   }
 
@@ -52,6 +64,9 @@ class UserSettings {
     bool? recordExercise,
     bool? recordStudy,
     List<String>? customQuestions,
+    bool? notificationEnabled,
+    int? notificationHour,
+    int? notificationMinute,
   }) {
     return UserSettings(
       recordEvent: recordEvent ?? this.recordEvent,
@@ -61,6 +76,9 @@ class UserSettings {
       recordExercise: recordExercise ?? this.recordExercise,
       recordStudy: recordStudy ?? this.recordStudy,
       customQuestions: customQuestions ?? this.customQuestions,
+      notificationEnabled: notificationEnabled ?? this.notificationEnabled,
+      notificationHour: notificationHour ?? this.notificationHour,
+      notificationMinute: notificationMinute ?? this.notificationMinute,
     );
   }
 }
