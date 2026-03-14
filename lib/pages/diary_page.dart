@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../core/theme/detective_theme.dart';
 import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
@@ -301,12 +302,29 @@ class _DiaryPageState extends State<DiaryPage> {
     final showConfirmButton = _phase == _Phase.confirm && !_isLoading;
 
     return Scaffold(
+      backgroundColor: DetectiveTheme.background,
+
+      // ── AppBar ──────────────────────────────────────────────
+      // 設定ページ・ホームと同じくサブタイトル付きで捜査中の雰囲気を演出する
       appBar: AppBar(
-        title: const Text('今日の日記'),
+        backgroundColor: DetectiveTheme.appBarBg,
+        foregroundColor: const Color(0xFFE8DCC8),
+        elevation: 0,
+        toolbarHeight: 64,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('新規捜査', style: DetectiveTheme.appBarTitle),
+            const SizedBox(height: 2),
+            const Text('― 証拠を集める ―',
+                style: DetectiveTheme.appBarSubtitle),
+          ],
+        ),
         actions: [
+          // 事件簿アーカイブへのショートカットボタン
           IconButton(
-            icon: const Icon(Icons.menu_book),
-            tooltip: '過去の日記',
+            icon: const Icon(Icons.folder_open),
+            tooltip: '事件簿アーカイブ',
             onPressed: () {
               if (_uid == null) return;
               Navigator.push(
@@ -337,8 +355,9 @@ class _DiaryPageState extends State<DiaryPage> {
           ),
           if (_isLoading)
             const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: CircularProgressIndicator(),
+              padding: EdgeInsets.all(12.0),
+              // ゴールドのローディングインジケーターでテーマに統一する
+              child: CircularProgressIndicator(color: DetectiveTheme.gold),
             ),
           // 選択肢ボタン群
           if (showChoices)
@@ -371,16 +390,17 @@ class _DiaryPageState extends State<DiaryPage> {
                 child: ElevatedButton(
                   onPressed: _generateDiary,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF5C3D2E),
+                    backgroundColor: DetectiveTheme.gold,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ),
                   child: const Text(
-                    'はい、日記を生成する',
-                    style: TextStyle(fontSize: 16),
+                    '事件簿を作成する',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
