@@ -426,6 +426,47 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
+  // 日記生成後の4択ボタン（これを記録/編集する/生成しなおす/はじめから）を処理する
+  Future<void> _handleDiaryViewChoice(String choice) async {
+    switch (choice) {
+      case 'これを記録':
+        // 日記はすでに_generateDiary()で保存済み。完了メッセージを投稿してdoneへ
+        setState(() => _phase = _Phase.done);
+        _postAiMessage(
+            'お疲れ様でした。記録した日記は事件簿アーカイブから確認できます。');
+      case '編集する':
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('この機能は現在準備中です。')),
+          );
+        }
+      case '生成しなおす':
+        setState(() => _diary = null);
+        await _generateDiary();
+      case 'はじめから質問をやりなおす':
+        // eventフェーズ以前のメッセージを保持し、それ以降をリセット
+        setState(() {
+          _messages.removeRange(_eventMsgStart, _messages.length);
+          _diary = null;
+          _diaryGenerated = false;
+          _pendingKey = null;
+          _currentChoices = null;
+          _phase = _Phase.event;
+        });
+        // event関連の回答をクリアしてキューを再構築
+        _answers.removeWhere((k, _) =>
+            k.startsWith('event_') || k == 'ai_followup' || k == 'addendum');
+        _eventQueue.clear();
+        for (final q in _eventQuestions) {
+          _eventQueue.add(q);
+        }
+        _postAiMessage(
+          'これから、日記にメインで記入する、今日を特徴づけるような出来事についてお聞きします。記入したい出来事を思い浮かべてください。',
+          choices: ['次へ'],
+        );
+    }
+  }
+
   // カスタム・思い出しアシストのincludeフラグを考慮してGeminiに渡す追加コンテキストを生成する
   String _buildAdditionalContext() {
     final lines = <String>[];
@@ -616,7 +657,120 @@ class _DiaryPageState extends State<DiaryPage> {
                 }).toList(),
               ),
             ),
-          // TODO(step4): diaryViewフェーズの4択ボタン（これを記録/編集/生成しなおす/はじめから）をここに追加する
+          // 日記確認フェーズの4択ボタン
+          if (_phase == _Phase.diaryView && _diaryGenerated && !_isLoading)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 上段: これを記録 / 編集する
+                  Row(
+                    children: ['これを記録', '編集する'].map((label) {
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: ElevatedButton(
+                            onPressed: () => _handleDiaryViewChoice(label),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: label == 'これを記録'
+                                  ? DetectiveTheme.gold
+                                  : const Color(0xFF5C3D2E),
+                              foregroundColor: Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                            child: Text(label),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 8),
+                  // 下段: 生成しなおす / はじめから
+                  Row(
+                    children: ['生成しなおす', 'はじめから質問をやりなおす'].map((label) {
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: OutlinedButton(
+                            onPressed: () => _handleDiaryViewChoice(label),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: DetectiveTheme.gold,
+                              side: const BorderSide(
+                                  color: DetectiveTheme.gold, width: 1),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                            child: Text(label,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          // 記録完了後のナビゲーションボタン（ホームへ / 事件簿アーカイブへ）
+          if (_phase == _Phase.done && !_isLoading)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: DetectiveTheme.gold,
+                          side: const BorderSide(
+                              color: DetectiveTheme.gold, width: 1),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        child: const Text('ホームへ'),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ElevatedButton(
+                        onPressed: () {
+                          if (_uid == null) return;
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DiaryListPage(uid: _uid!),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: DetectiveTheme.gold,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        child: const Text('事件簿アーカイブへ'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (!_showExistingDiaryChoice && showInput)
             InputArea(controller: _textController, onSubmit: _sendUserReply),
         ],
