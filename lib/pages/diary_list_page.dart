@@ -86,14 +86,19 @@ class DiaryListPage extends StatelessWidget {
               final diary = data['diary'] as String;
 
               // タップで日記詳細ページへ遷移する
+              final firestore = FirestoreService();
               return _CaseArchiveItem(
                 date: date,
                 diary: diary,
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        DiaryDetailPage(date: date, diary: diary),
+                    builder: (_) => DiaryDetailPage(
+                      date: date,
+                      diary: diary,
+                      uid: uid,
+                      firestore: firestore,
+                    ),
                   ),
                 ),
               );

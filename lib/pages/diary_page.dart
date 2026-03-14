@@ -62,6 +62,7 @@ class _DiaryPageState extends State<DiaryPage> {
   bool _isLoading = false;
   bool _diaryGenerated = false;
   bool _showExistingDiaryChoice = false; // 追記 or 確認の選択肢を表示するフラグ
+  bool _viewingExisting = false;         // 既存日記を「確認する」で表示中か
   final TextEditingController _textController = TextEditingController();
   List<String>? _currentChoices; // 現在表示中の選択肢。nullのときはテキスト入力を表示
   String? _pendingKey; // 直前のAI質問のキー（次のユーザー回答をanswersに紐づけるため）
@@ -168,6 +169,7 @@ class _DiaryPageState extends State<DiaryPage> {
       setState(() {
         _diary = _existingDiary;
         _diaryGenerated = true;
+        _viewingExisting = true;
       });
       return;
     }
@@ -716,6 +718,57 @@ class _DiaryPageState extends State<DiaryPage> {
               child: _currentChoices!.length > 2
                   ? _buildDropdown(_currentChoices!)
                   : _buildChoiceButtons(_currentChoices!),
+            ),
+          // 既存日記を「確認する」で表示中の「編集する」ボタン
+          if (_viewingExisting && _diaryGenerated && !_isLoading)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: DetectiveTheme.gold,
+                          side: const BorderSide(color: DetectiveTheme.gold),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20)),
+                        ),
+                        child: const Text('閉じる'),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => DiaryEditPage(
+                              uid: _uid!,
+                              today: _today!,
+                              firestore: _firestore,
+                              initialDiary: _diary,
+                            ),
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: DetectiveTheme.gold,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20)),
+                        ),
+                        child: const Text('編集する'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           // 日記確認フェーズの4択ボタン
           if (_phase == _Phase.diaryView && _diaryGenerated && !_isLoading)
