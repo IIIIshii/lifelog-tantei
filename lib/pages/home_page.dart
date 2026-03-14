@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/theme/detective_theme.dart';
 import '../services/auth_service.dart';
 import 'activity_page.dart';
 import 'diary_page.dart';
@@ -30,73 +31,84 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F0EB),
+      backgroundColor: DetectiveTheme.background,
+
+      // ── AppBar ──────────────────────────────────────────────
+      // タイトルにサブタイトルを重ねることで探偵事務所の看板風に見せる
       appBar: AppBar(
-        title: const Text('ライフログ探偵'),
-        backgroundColor: const Color(0xFF3D2B1F),
-        foregroundColor: Colors.white,
+        backgroundColor: DetectiveTheme.appBarBg,
         elevation: 0,
+        toolbarHeight: 64,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ライフログ探偵', style: DetectiveTheme.appBarTitle),
+            const SizedBox(height: 2),
+            const Text('― 事件、受け付けます ―',
+                style: DetectiveTheme.appBarSubtitle),
+          ],
+        ),
       ),
+
+      // ── Body ────────────────────────────────────────────────
       body: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 8),
+            // キャッチコピー
             const Text(
-              '今日も記録してみましょう',
-              style: TextStyle(
-                fontSize: 14,
-                color: Color(0xFF7A5C4A),
-              ),
+              '今日も新たな記録が待っている——',
+              style: DetectiveTheme.catchphrase,
             ),
-            const SizedBox(height: 24),
-            _MenuCard(
-              icon: Icons.edit_note,
-              title: '今日の日記',
-              subtitle: '日記を書く・追記する',
-              color: const Color(0xFF5C3D2E),
+            const SizedBox(height: 28),
+
+            // ── メニューカード一覧 ──────────────────────────
+            // 各カードはマニラフォルダー風のデザインで「事件ファイル」を表現
+            _CaseFileCard(
+              caseNumber: 'No.01',
+              icon: Icons.search,
+              title: '新規事件を開く',
+              subtitle: '（日記をつける）',
               onTap: _uid == null
                   ? null
                   : () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => const DiaryPage(),
-                        ),
+                            builder: (_) => const DiaryPage()),
                       ),
             ),
             const SizedBox(height: 16),
-            _MenuCard(
-              icon: Icons.menu_book,
-              title: '日記の記録',
-              subtitle: '過去の日記を見る',
-              color: const Color(0xFF2E5C45),
+            _CaseFileCard(
+              caseNumber: 'No.02',
+              icon: Icons.folder_open,
+              title: '事件簿アーカイブ',
+              subtitle: '（過去の日記を見る）',
               onTap: _uid == null
                   ? null
                   : () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => DiaryListPage(uid: _uid!),
-                        ),
+                            builder: (_) => DiaryListPage(uid: _uid!)),
                       ),
             ),
             const SizedBox(height: 16),
-            _MenuCard(
-              icon: Icons.bar_chart,
-              title: '活動の記録',
-              subtitle: '習慣や行動をグラフで見る',
-              color: const Color(0xFF2E4A5C),
+            _CaseFileCard(
+              caseNumber: 'No.03',
+              icon: Icons.analytics,
+              title: '証拠分析室',
+              subtitle: '（習慣や行動をグラフで見る）',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const ActivityPage()),
               ),
             ),
             const SizedBox(height: 16),
-            _MenuCard(
-              icon: Icons.settings,
-              title: '設定',
-              subtitle: '記録したい項目を設定する',
-              color: const Color(0xFF4A4A5C),
+            _CaseFileCard(
+              caseNumber: 'No.04',
+              icon: Icons.business_center,
+              title: '探偵事務所',
+              subtitle: '（設定する）',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const SettingsPage()),
@@ -107,75 +119,129 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-
-
 }
 
-class _MenuCard extends StatelessWidget {
+// ──────────────────────────────────────────────────────────────
+// マニラフォルダー風カード
+//
+// 上部にケース番号のタブを付け、左端にゴールドの縦ボーダーを引くことで
+// 「事件ファイル」らしい書類感を演出する。
+// ──────────────────────────────────────────────────────────────
+class _CaseFileCard extends StatelessWidget {
+  final String caseNumber;
   final IconData icon;
   final String title;
   final String subtitle;
-  final Color color;
   final VoidCallback? onTap;
 
-  const _MenuCard({
+  const _CaseFileCard({
+    required this.caseNumber,
     required this.icon,
     required this.title,
     required this.subtitle,
-    required this.color,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      elevation: 2,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-          child: Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: Colors.white, size: 28),
+    // タブ部分の高さ（フォルダータブを再現する）
+    const double tabHeight = 22.0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // ── フォルダータブ（ケース番号） ──────────────────────
+        // カード左上に突き出す小さなタブでマニラフォルダーを表現
+        Container(
+          height: tabHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: const BoxDecoration(
+            color: DetectiveTheme.goldLight,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(4),
+              topRight: Radius.circular(8),
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(caseNumber, style: DetectiveTheme.caseNumber),
+        ),
+
+        // ── メインカード本体 ──────────────────────────────────
+        // タブの直下に配置し、左上の角だけ角丸なしにしてタブとの接続を自然に見せる
+        Material(
+          color: DetectiveTheme.cardBg,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.only(
+              topRight: Radius.circular(4),
+              bottomLeft: Radius.circular(4),
+              bottomRight: Radius.circular(4),
+            ),
+            side: BorderSide(color: DetectiveTheme.cardBorder),
+          ),
+          child: InkWell(
+            onTap: onTap,
+            customBorder: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.only(
+                topRight: Radius.circular(4),
+                bottomLeft: Radius.circular(4),
+                bottomRight: Radius.circular(4),
               ),
-              const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1A1A1A),
+                  // 左端のゴールドアクセントボーダー
+                  Container(
+                    width: 4,
+                    decoration: const BoxDecoration(
+                      color: DetectiveTheme.gold,
+                      borderRadius: BorderRadius.only(
+                        bottomLeft: Radius.circular(4),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF888888),
+
+                  // カード本文
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 14),
+                      child: Row(
+                        children: [
+                          // アイコン
+                          Icon(icon,
+                              color: DetectiveTheme.gold, size: 28),
+                          const SizedBox(width: 16),
+
+                          // タイトル + サブタイトル
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(title,
+                                  style: DetectiveTheme.cardTitle),
+                              const SizedBox(height: 2),
+                              Text(subtitle,
+                                  style: DetectiveTheme.cardSubtitle),
+                            ],
+                          ),
+
+                          const Spacer(),
+
+                          // 右端の矢印
+                          const Icon(Icons.chevron_right,
+                              color: DetectiveTheme.goldLight),
+                        ],
+                      ),
                     ),
                   ),
                 ],
               ),
-              const Spacer(),
-              const Icon(Icons.chevron_right, color: Color(0xFFCCCCCC)),
-            ],
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 }
