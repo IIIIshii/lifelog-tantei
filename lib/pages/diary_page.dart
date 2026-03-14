@@ -10,6 +10,7 @@ import '../widgets/message_bubble.dart';
 import '../widgets/diary_card.dart';
 import '../widgets/input_area.dart';
 import 'diary_list_page.dart';
+import 'diary_edit_page.dart';
 
 // 質問フェーズを表す列挙型
 // fixed        : 設定ベースの固定質問（睡眠/食事/運動/勉強/recallAssist）
@@ -384,14 +385,19 @@ class _DiaryPageState extends State<DiaryPage> {
             choices: ['次へ'],
           );
         } else {
-          // 「自分で入力」は未実装
+          // 「自分で入力」→ テキスト編集ページへ
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('この機能は現在準備中です。')),
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => DiaryEditPage(
+                  uid: _uid!,
+                  today: _today!,
+                  firestore: _firestore,
+                ),
+              ),
             );
           }
-          _phase = _Phase.modeSelect;
-          await _askNext();
         }
       case _Phase.event:
         await _askNext();
@@ -446,8 +452,16 @@ class _DiaryPageState extends State<DiaryPage> {
             'お疲れ様でした。記録した日記は事件簿アーカイブから確認できます。');
       case '編集する':
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('この機能は現在準備中です。')),
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => DiaryEditPage(
+                uid: _uid!,
+                today: _today!,
+                firestore: _firestore,
+                initialDiary: _diary,
+              ),
+            ),
           );
         }
       case '生成しなおす':
