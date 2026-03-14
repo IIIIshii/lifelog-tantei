@@ -20,11 +20,14 @@ import 'diary_list_page.dart';
 // done         : 全質問完了・日記生成待ち
 enum _Phase { fixed, eventQuestions, ai, addendum, custom, confirm, done }
 
-// 1つの質問を表すデータクラス。choicesがnullの場合はテキスト入力式
+// 1つの質問を表すデータクラス
+// choices: nullのときはテキスト入力式
+// key: answersマップへの保存キー。nullのとき（導入文など）は回答を記録しない
 class _Question {
   final String text;
   final List<String>? choices;
-  const _Question(this.text, {this.choices});
+  final String? key;
+  const _Question(this.text, {this.choices, this.key});
 }
 
 // 今日の日記を作成するページ。AIとの対話を通じて日記を生成する
@@ -45,6 +48,8 @@ class _DiaryPageState extends State<DiaryPage> {
   bool _diaryGenerated = false;
   final TextEditingController _textController = TextEditingController();
   List<String>? _currentChoices; // 現在表示中の選択肢。nullのときはテキスト入力を表示
+  String? _pendingKey; // 直前のAI質問のキー（次のユーザー回答をanswersに紐づけるため）
+  final Map<String, String> _answers = {}; // 質問キー → 回答テキストのマップ
 
   late final GeminiService _gemini;
   final AuthService _auth = AuthService();
@@ -55,7 +60,7 @@ class _DiaryPageState extends State<DiaryPage> {
   final Queue<_Question> _eventQueue = Queue(); // 出来事の構造化質問のキュー
   final Queue<_Question> _customQueue = Queue(); // ユーザー定義のカスタム質問のキュー
 
-  // 出来事についての構造化された固定質問リスト
+  // 出来事についての構造化された固定質問リスト（_eventQuestionKeysと順序を合わせること）
   static const List<String> _eventQuestions = [
     'それはいつの出来事ですか？',
     'どこでありましたか？',
@@ -63,6 +68,16 @@ class _DiaryPageState extends State<DiaryPage> {
     '誰かと一緒でしたか？',
     '具体的に何をしましたか？',
     'どんな気分・感想でしたか？',
+  ];
+
+  // 各出来事質問に対応する answers マップのキー（_eventQuestionsと順序を合わせること）
+  static const List<String> _eventQuestionKeys = [
+    'event_when',
+    'event_where',
+    'event_who',
+    'event_with',
+    'event_what',
+    'event_how',
   ];
 
   @override
@@ -110,9 +125,9 @@ class _DiaryPageState extends State<DiaryPage> {
     if (settings.recallAssist) {
       // 思い出しアシストONの場合、時間帯別の質問を3問追加する
       _fixedQueue.addAll([
-        const _Question('午前中は何をしていましたか？'),
-        const _Question('午後は何をしていましたか？'),
-        const _Question('夜は何をしていましたか？'),
+        const _Question('午前中は何をしていましたか？', key: 'morning'),
+        const _Question('午後は何をしていましたか？', key: 'afternoon'),
+        const _Question('夜は何をしていましたか？', key: 'evening'),
       ]);
     }
     if (settings.recordSleep) {
@@ -120,28 +135,32 @@ class _DiaryPageState extends State<DiaryPage> {
       _fixedQueue.add(const _Question(
         '昨夜は何時間くらい眠れましたか？',
         choices: ['4時間以下', '5時間', '6時間', '7時間', '8時間', '9時間以上'],
+        key: 'sleep',
       ));
     }
     if (settings.recordFood) {
-      _fixedQueue.add(const _Question('今日食べたものを教えてください。'));
+      _fixedQueue.add(const _Question('今日食べたものを教えてください。', key: 'food'));
     }
     if (settings.recordExercise) {
       // 筋トレの有無はYes/No選択式
       _fixedQueue.add(const _Question(
         '今日、筋トレをしましたか？',
         choices: ['はい', 'いいえ'],
+        key: 'exercise',
       ));
     }
     if (settings.recordStudy) {
-      _fixedQueue.add(const _Question('今日の勉強内容を教えてください。'));
+      _fixedQueue.add(const _Question('今日の勉強内容を教えてください。', key: 'study'));
     }
 
-    // 出来事の構造化質問を冒頭に「記録したい出来事についてお聞きします」を付けてキューへ
+    // 冒頭の導入文はkeyなし（ユーザーの回答を伴わないため）
     _eventQueue.add(const _Question('記録したい出来事についてお聞きします。'));
-    _eventQueue.addAll(_eventQuestions.map((q) => _Question(q)));
+    for (var i = 0; i < _eventQuestions.length; i++) {
+      _eventQueue.add(_Question(_eventQuestions[i], key: _eventQuestionKeys[i]));
+    }
 
-    for (final q in settings.customQuestions) {
-      _customQueue.add(_Question(q));
+    for (var i = 0; i < settings.customQuestions.length; i++) {
+      _customQueue.add(_Question(settings.customQuestions[i], key: 'custom_$i'));
     }
   }
 
@@ -166,7 +185,8 @@ class _DiaryPageState extends State<DiaryPage> {
           await _askAiFollowUp();
         }
       case _Phase.addendum:
-        _postAiMessage('追記したいことはありますか？（なければ「なし」と入力してください）');
+        _postAiMessage('追記したいことはありますか？（なければ「なし」と入力してください）',
+            key: 'addendum');
       case _Phase.custom:
         if (_customQueue.isNotEmpty) {
           final q = _customQueue.removeFirst();
@@ -187,12 +207,14 @@ class _DiaryPageState extends State<DiaryPage> {
   }
 
   // Geminiを呼ばずにメッセージをAI発言としてリストとFirestoreに追加する
-  // choicesが指定された場合は選択肢ボタンを表示する
-  void _postAiMessage(String text, {List<String>? choices}) {
+  // choices: 指定された場合は選択肢ボタンを表示
+  // key: 次のユーザー回答をanswersマップに記録する際のキー
+  void _postAiMessage(String text, {List<String>? choices, String? key}) {
     _firestore.saveMessage(_uid!, _today!, 'ai', text, _conversationOrder++);
     setState(() {
       _messages.add({'role': 'ai', 'text': text});
       _currentChoices = choices;
+      _pendingKey = key;
     });
   }
 
@@ -201,6 +223,12 @@ class _DiaryPageState extends State<DiaryPage> {
     if (text.trim().isEmpty) return;
     _textController.clear();
     setState(() => _currentChoices = null); // 選択肢を閉じる
+
+    // 直前の質問にキーがあれば回答をanswersマップに記録する
+    if (_pendingKey != null) {
+      _answers[_pendingKey!] = text;
+      _pendingKey = null;
+    }
 
     await _firestore.saveMessage(
         _uid!, _today!, 'user', text, _conversationOrder++);
@@ -237,7 +265,10 @@ class _DiaryPageState extends State<DiaryPage> {
       final followUp = await _gemini.generateFollowUp(_messages);
       await _firestore.saveMessage(
           _uid!, _today!, 'ai', followUp, _conversationOrder++);
-      setState(() => _messages.add({'role': 'ai', 'text': followUp}));
+      setState(() {
+        _messages.add({'role': 'ai', 'text': followUp});
+        _pendingKey = 'ai_followup';
+      });
     } catch (e) {
       _showError('AIエラー: $e');
     } finally {
@@ -253,7 +284,10 @@ class _DiaryPageState extends State<DiaryPage> {
     });
     try {
       final diary = await _gemini.generateDiary(_messages);
-      await _firestore.saveDiary(_uid!, _today!, diary);
+      await Future.wait([
+        _firestore.saveDiary(_uid!, _today!, diary),
+        _firestore.saveAnswers(_uid!, _today!, _answers),
+      ]);
       setState(() {
         _diary = diary;
         _diaryGenerated = true;

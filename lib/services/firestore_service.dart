@@ -60,6 +60,18 @@ class FirestoreService {
     });
   }
 
+  // 質問キー→回答テキストのマップをFirestoreに保存する（既存データとマージする）
+  Future<void> saveAnswers(
+      String uid, String date, Map<String, String> answers) async {
+    if (answers.isEmpty) return;
+    await _db
+        .collection('users')
+        .doc(uid)
+        .collection('entries')
+        .doc(date)
+        .set({'answers': answers}, SetOptions(merge: true));
+  }
+
   // 生成した日記テキストをFirestoreに保存する（既存データとマージする）
   Future<void> saveDiary(String uid, String date, String diary) async {
     await _db
