@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import '../core/theme/detective_theme.dart';
 import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 
-// ユーザーが記録したい項目を設定する画面
+// ユーザーが捜査（記録）方針を設定する画面
+// 記録項目のON/OFFとカスタム質問の管理を行う
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -44,7 +46,7 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  // 設定を更新してFirestoreに即時保存する
+  // 設定を更新してFirestoreに即時保存する（トグル操作のたびに呼ばれる）
   Future<void> _save(UserSettings newSettings) async {
     setState(() {
       _settings = newSettings;
@@ -74,14 +76,26 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F0EB),
+      backgroundColor: DetectiveTheme.background,
+
+      // ── AppBar ──────────────────────────────────────────────
+      // ホーム画面と同じくサブタイトル付きで探偵事務所の雰囲気を演出
       appBar: AppBar(
-        title: const Text('設定'),
-        backgroundColor: const Color(0xFF3D2B1F),
-        foregroundColor: Colors.white,
+        backgroundColor: DetectiveTheme.appBarBg,
+        foregroundColor: const Color(0xFFE8DCC8),
         elevation: 0,
+        toolbarHeight: 64,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('探偵事務所', style: DetectiveTheme.appBarTitle),
+            const SizedBox(height: 2),
+            const Text('― 捜査方針を設定する ―',
+                style: DetectiveTheme.appBarSubtitle),
+          ],
+        ),
         actions: [
-          // 保存中はスピナーをAppBarに表示する
+          // 保存中はAppBar右端にゴールドのスピナーを表示する
           if (_isSaving)
             const Padding(
               padding: EdgeInsets.all(16),
@@ -89,29 +103,38 @@ class _SettingsPageState extends State<SettingsPage> {
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
-                  color: Colors.white,
+                  color: DetectiveTheme.goldLight,
                   strokeWidth: 2,
                 ),
               ),
             ),
         ],
       ),
+
+      // ── Body ────────────────────────────────────────────────
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: DetectiveTheme.gold),
+            )
           : ListView(
               padding: const EdgeInsets.all(20),
               children: [
-                _SectionHeader(title: '記録したい項目'),
+                // ── セクション1: 捜査項目 ──────────────────────
+                const _SectionHeader(
+                  title: '◆ 捜査項目の選択',
+                  subtitle: '記録したい項目を追加',
+                ),
                 const SizedBox(height: 8),
                 _SettingsCard(
                   children: [
-                    _SettingsTile(
+                    // 「その日の印象的なイベント」は必須項目のため常にON・変更不可
+                    const _SettingsTile(
                       title: 'その日の印象的なイベント',
                       subtitle: '今日の出来事についてAIが質問します（必須）',
                       value: true,
-                      onChanged: null, // 必須項目のため変更不可
+                      onChanged: null,
                     ),
-                    const Divider(height: 1),
+                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
                     _SettingsTile(
                       title: '思い出しアシスト',
                       subtitle: '午前・午後・夜に何をしたか追加で聞きます',
@@ -119,7 +142,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) =>
                           _save(_settings.copyWith(recallAssist: v)),
                     ),
-                    const Divider(height: 1),
+                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
                     _SettingsTile(
                       title: '睡眠時間',
                       subtitle: '昨夜の睡眠について記録します',
@@ -127,7 +150,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) =>
                           _save(_settings.copyWith(recordSleep: v)),
                     ),
-                    const Divider(height: 1),
+                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
                     _SettingsTile(
                       title: '食べたもの',
                       subtitle: '今日の食事について記録します',
@@ -135,7 +158,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) =>
                           _save(_settings.copyWith(recordFood: v)),
                     ),
-                    const Divider(height: 1),
+                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
                     _SettingsTile(
                       title: '運動習慣',
                       subtitle: '今日の運動について記録します',
@@ -143,7 +166,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) =>
                           _save(_settings.copyWith(recordExercise: v)),
                     ),
-                    const Divider(height: 1),
+                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
                     _SettingsTile(
                       title: '勉強内容',
                       subtitle: '今日の勉強について記録します',
@@ -153,8 +176,14 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 24),
-                _SectionHeader(title: 'カスタム質問'),
+
+                const SizedBox(height: 28),
+
+                // ── セクション2: 独自質問 ──────────────────────
+                const _SectionHeader(
+                  title: '◆ 独自質問リスト',
+                  subtitle: '自分だけの質問を追加',
+                ),
                 const SizedBox(height: 8),
                 _SettingsCard(
                   children: [
@@ -163,22 +192,36 @@ class _SettingsPageState extends State<SettingsPage> {
                       return Column(
                         children: [
                           ListTile(
-                            title: Text(entry.value),
+                            title: Text(
+                              entry.value,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: DetectiveTheme.textPrimary,
+                              ),
+                            ),
+                            // 削除ボタン
                             trailing: IconButton(
                               icon: const Icon(Icons.delete_outline,
-                                  color: Color(0xFF888888)),
+                                  color: DetectiveTheme.textSecondary,
+                                  size: 20),
                               onPressed: () =>
                                   _removeCustomQuestion(entry.key),
                             ),
                           ),
                           if (entry.key <
                               _settings.customQuestions.length - 1)
-                            const Divider(height: 1),
+                            const Divider(
+                                height: 1,
+                                color: DetectiveTheme.cardBorder),
                         ],
                       );
                     }),
+
+                    // 既存質問がある場合は区切り線を入れる
                     if (_settings.customQuestions.isNotEmpty)
-                      const Divider(height: 1),
+                      const Divider(
+                          height: 1, color: DetectiveTheme.cardBorder),
+
                     // 新しいカスタム質問を入力・追加するフィールド
                     Padding(
                       padding: const EdgeInsets.symmetric(
@@ -188,16 +231,25 @@ class _SettingsPageState extends State<SettingsPage> {
                           Expanded(
                             child: TextField(
                               controller: _customQuestionController,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: DetectiveTheme.textPrimary,
+                              ),
                               decoration: const InputDecoration(
                                 hintText: '質問を追加（例：今日の天気は？）',
+                                hintStyle: TextStyle(
+                                  color: DetectiveTheme.textSecondary,
+                                  fontSize: 13,
+                                ),
                                 border: InputBorder.none,
                               ),
                               onSubmitted: (_) => _addCustomQuestion(),
                             ),
                           ),
+                          // 追加ボタン（ゴールドアイコン）
                           IconButton(
                             icon: const Icon(Icons.add_circle,
-                                color: Color(0xFF5C3D2E)),
+                                color: DetectiveTheme.gold),
                             onPressed: _addCustomQuestion,
                           ),
                         ],
@@ -211,27 +263,51 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-// セクションの見出しラベルウィジェット
+// ──────────────────────────────────────────────────────────────
+// セクションの見出しウィジェット
+//
+// タイトル（太字・ゴールド）とその下に機能説明のサブタイトルを表示する。
+// ◆ 記号でノワール感のある区切りを演出する。
+// ──────────────────────────────────────────────────────────────
 class _SectionHeader extends StatelessWidget {
   final String title;
+  final String subtitle;
 
-  const _SectionHeader({required this.title});
+  const _SectionHeader({required this.title, required this.subtitle});
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.bold,
-        color: Color(0xFF7A5C4A),
-        letterSpacing: 0.5,
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: DetectiveTheme.gold,
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            fontSize: 11,
+            color: DetectiveTheme.textSecondary,
+          ),
+        ),
+      ],
     );
   }
 }
 
-// 設定項目をまとめる白いカードウィジェット
+// ──────────────────────────────────────────────────────────────
+// 設定項目をまとめる書類風カードウィジェット
+//
+// ホームのCaseFileCardと同じテイストでクリーム背景＋ゴールド枠線を使用。
+// 角丸を小さくして書類感を強調する。
+// ──────────────────────────────────────────────────────────────
 class _SettingsCard extends StatelessWidget {
   final List<Widget> children;
 
@@ -239,19 +315,27 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      elevation: 2,
+    return Container(
+      decoration: BoxDecoration(
+        color: DetectiveTheme.cardBg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: DetectiveTheme.cardBorder),
+      ),
+      // ClipRRectでカード内のウィジェットが角丸からはみ出ないようにする
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(4),
         child: Column(children: children),
       ),
     );
   }
 }
 
-// 各設定項目のスイッチ付きリストタイルウィジェット
+// ──────────────────────────────────────────────────────────────
+// 各設定項目のスイッチ付きタイルウィジェット
+//
+// onChangedがnullの場合はスイッチが無効（変更不可）になる。
+// 必須項目（イベント記録）はnullを渡してグレーアウトする。
+// ──────────────────────────────────────────────────────────────
 class _SettingsTile extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -270,15 +354,24 @@ class _SettingsTile extends StatelessWidget {
     return SwitchListTile(
       title: Text(
         title,
-        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: DetectiveTheme.textPrimary,
+        ),
       ),
       subtitle: Text(
         subtitle,
-        style: const TextStyle(fontSize: 12, color: Color(0xFF888888)),
+        style: const TextStyle(
+          fontSize: 12,
+          color: DetectiveTheme.textSecondary,
+        ),
       ),
       value: value,
       onChanged: onChanged,
-      activeColor: const Color(0xFF5C3D2E),
+      // アクティブ時はゴールドで探偵テーマに統一（activeColorはv3.31以降非推奨）
+      activeThumbColor: DetectiveTheme.gold,
+      activeTrackColor: DetectiveTheme.goldLight,
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../core/theme/detective_theme.dart';
 import '../models/user_settings.dart';
 import '../prompts/diary_prompts.dart';
 import '../services/auth_service.dart';
@@ -19,6 +20,16 @@ import 'diary_list_page.dart';
 // done       : 全質問完了・日記生成中/生成済み
 enum _Phase { opening, aiFollowUp, fixed, custom, done }
 
+// 1つの質問を表すデータクラス
+// choices: nullのときはテキスト入力式
+// key: answersマップへの保存キー。nullのとき（導入文など）は回答を記録しない
+class _Question {
+  final String text;
+  final List<String>? choices;
+  final String? key;
+  const _Question(this.text, {this.choices, this.key});
+}
+
 // 今日の日記を作成するページ。AIとの対話を通じて日記を生成する
 class DiaryPage extends StatefulWidget {
   const DiaryPage({super.key});
@@ -36,6 +47,9 @@ class _DiaryPageState extends State<DiaryPage> {
   bool _isLoading = false;
   bool _diaryGenerated = false;
   final TextEditingController _textController = TextEditingController();
+  List<String>? _currentChoices; // 現在表示中の選択肢。nullのときはテキスト入力を表示
+  String? _pendingKey; // 直前のAI質問のキー（次のユーザー回答をanswersに紐づけるため）
+  final Map<String, String> _answers = {}; // 質問キー → 回答テキストのマップ
 
   late final GeminiService _gemini;
   final AuthService _auth = AuthService();
@@ -43,8 +57,8 @@ class _DiaryPageState extends State<DiaryPage> {
 
   _Phase _phase = _Phase.opening;
   int _aiFollowUpCount = 0; // AI深堀り質問の回数（3問目安）
-  final Queue<String> _fixedQueue = Queue(); // 設定から生成した固定質問のキュー
-  final Queue<String> _customQueue = Queue(); // ユーザー定義のカスタム質問のキュー
+  final Queue<_Question> _fixedQueue = Queue(); // 設定から生成した固定質問のキュー
+  final Queue<_Question> _customQueue = Queue(); // ユーザー定義のカスタム質問のキュー
 
   @override
   void initState() {
@@ -93,26 +107,36 @@ class _DiaryPageState extends State<DiaryPage> {
     if (settings.recallAssist) {
       // 思い出しアシストONの場合、時間帯別の質問を追加する
       _fixedQueue.addAll([
-        '午前中は何をしていましたか？',
-        '午後は何をしていましたか？',
-        '夜は何をしていましたか？',
+        const _Question('午前中は何をしていましたか？', key: 'morning'),
+        const _Question('午後は何をしていましたか？', key: 'afternoon'),
+        const _Question('夜は何をしていましたか？', key: 'evening'),
       ]);
     }
     if (settings.recordSleep) {
-      _fixedQueue.add('昨夜は何時間くらい眠れましたか？');
+      // 睡眠時間は数字選択式
+      _fixedQueue.add(const _Question(
+        '昨夜は何時間くらい眠れましたか？',
+        choices: ['4時間以下', '5時間', '6時間', '7時間', '8時間', '9時間以上'],
+        key: 'sleep',
+      ));
     }
     if (settings.recordFood) {
-      _fixedQueue.add('今日食べたものを教えてください。');
+      _fixedQueue.add(const _Question('今日食べたものを教えてください。', key: 'food'));
     }
     if (settings.recordExercise) {
-      _fixedQueue.add('今日運動しましたか？');
+      // 筋トレの有無はYes/No選択式
+      _fixedQueue.add(const _Question(
+        '今日、筋トレをしましたか？',
+        choices: ['はい', 'いいえ'],
+        key: 'exercise',
+      ));
     }
     if (settings.recordStudy) {
-      _fixedQueue.add('今日の勉強内容を教えてください。');
+      _fixedQueue.add(const _Question('今日の勉強内容を教えてください。', key: 'study'));
     }
 
-    for (final q in settings.customQuestions) {
-      _customQueue.add(q);
+    for (var i = 0; i < settings.customQuestions.length; i++) {
+      _customQueue.add(_Question(settings.customQuestions[i], key: 'custom_$i'));
     }
   }
 
@@ -125,14 +149,16 @@ class _DiaryPageState extends State<DiaryPage> {
         await _askAiFollowUp();
       case _Phase.fixed:
         if (_fixedQueue.isNotEmpty) {
-          _postAiMessage(_fixedQueue.removeFirst());
+          final q = _fixedQueue.removeFirst();
+          _postAiMessage(q.text, choices: q.choices, key: q.key);
         } else {
           _phase = _Phase.custom;
           await _askNext();
         }
       case _Phase.custom:
         if (_customQueue.isNotEmpty) {
-          _postAiMessage(_customQueue.removeFirst());
+          final q = _customQueue.removeFirst();
+          _postAiMessage(q.text, choices: q.choices, key: q.key);
         } else {
           // 全質問終了後、確認なしで直接日記を生成する
           await _generateDiary();
@@ -143,15 +169,28 @@ class _DiaryPageState extends State<DiaryPage> {
   }
 
   // Geminiを呼ばずにメッセージをAI発言としてリストとFirestoreに追加する
-  void _postAiMessage(String text) {
+  // choices: 指定された場合は選択肢ボタンを表示
+  // key: 次のユーザー回答をanswersマップに記録する際のキー
+  void _postAiMessage(String text, {List<String>? choices, String? key}) {
     _firestore.saveMessage(_uid!, _today!, 'ai', text, _conversationOrder++);
-    setState(() => _messages.add({'role': 'ai', 'text': text}));
+    setState(() {
+      _messages.add({'role': 'ai', 'text': text});
+      _currentChoices = choices;
+      _pendingKey = key;
+    });
   }
 
   // ユーザーの返答を受け取り、現在のフェーズに応じて次のアクションを決める
   Future<void> _sendUserReply(String text) async {
     if (text.trim().isEmpty) return;
     _textController.clear();
+    setState(() => _currentChoices = null); // 選択肢を閉じる
+
+    // 直前の質問にキーがあれば回答をanswersマップに記録する
+    if (_pendingKey != null) {
+      _answers[_pendingKey!] = text;
+      _pendingKey = null;
+    }
 
     await _firestore.saveMessage(
         _uid!, _today!, 'user', text, _conversationOrder++);
@@ -196,7 +235,10 @@ class _DiaryPageState extends State<DiaryPage> {
       _aiFollowUpCount++;
       await _firestore.saveMessage(
           _uid!, _today!, 'ai', followUp, _conversationOrder++);
-      setState(() => _messages.add({'role': 'ai', 'text': followUp}));
+      setState(() {
+        _messages.add({'role': 'ai', 'text': followUp});
+        _pendingKey = 'ai_followup_$_aiFollowUpCount';
+      });
     } catch (e) {
       _showError('AIエラー: $e');
     } finally {
@@ -212,7 +254,10 @@ class _DiaryPageState extends State<DiaryPage> {
     });
     try {
       final diary = await _gemini.generateDiary(_messages);
-      await _firestore.saveDiary(_uid!, _today!, diary);
+      await Future.wait([
+        _firestore.saveDiary(_uid!, _today!, diary),
+        _firestore.saveAnswers(_uid!, _today!, _answers),
+      ]);
       setState(() {
         _diary = diary;
         _diaryGenerated = true;
@@ -244,18 +289,42 @@ class _DiaryPageState extends State<DiaryPage> {
   @override
   Widget build(BuildContext context) {
     final lastIsAI = _messages.isNotEmpty && _messages.last['role'] == 'ai';
+    final showChoices = !_diaryGenerated &&
+        !_isLoading &&
+        lastIsAI &&
+        _currentChoices != null &&
+        _phase != _Phase.done;
+    // 選択肢表示中はテキスト入力を非表示にする
     final showInput = !_diaryGenerated &&
         !_isLoading &&
         lastIsAI &&
+        _currentChoices == null &&
         _phase != _Phase.done;
 
     return Scaffold(
+      backgroundColor: DetectiveTheme.background,
+
+      // ── AppBar ──────────────────────────────────────────────
+      // 設定ページ・ホームと同じくサブタイトル付きで捜査中の雰囲気を演出する
       appBar: AppBar(
-        title: const Text('今日の日記'),
+        backgroundColor: DetectiveTheme.appBarBg,
+        foregroundColor: const Color(0xFFE8DCC8),
+        elevation: 0,
+        toolbarHeight: 64,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('新規捜査', style: DetectiveTheme.appBarTitle),
+            const SizedBox(height: 2),
+            const Text('― 証拠を集める ―',
+                style: DetectiveTheme.appBarSubtitle),
+          ],
+        ),
         actions: [
+          // 事件簿アーカイブへのショートカットボタン
           IconButton(
-            icon: const Icon(Icons.menu_book),
-            tooltip: '過去の日記',
+            icon: const Icon(Icons.folder_open),
+            tooltip: '事件簿アーカイブ',
             onPressed: () {
               if (_uid == null) return;
               Navigator.push(
@@ -286,8 +355,31 @@ class _DiaryPageState extends State<DiaryPage> {
           ),
           if (_isLoading)
             const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: CircularProgressIndicator(),
+              padding: EdgeInsets.all(12.0),
+              // ゴールドのローディングインジケーターでテーマに統一する
+              child: CircularProgressIndicator(color: DetectiveTheme.gold),
+            ),
+          // 選択肢ボタン群
+          if (showChoices)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _currentChoices!.map((choice) {
+                  return ElevatedButton(
+                    onPressed: () => _sendUserReply(choice),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5C3D2E),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                    child: Text(choice),
+                  );
+                }).toList(),
+              ),
             ),
           if (showInput)
             InputArea(controller: _textController, onSubmit: _sendUserReply),
