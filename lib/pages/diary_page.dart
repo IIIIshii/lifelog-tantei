@@ -182,10 +182,8 @@ class _DiaryPageState extends State<DiaryPage> {
       _fixedQueue.add(const _Question('今日食べたものを教えてください。', key: 'food'));
     }
     if (settings.recordExercise) {
-      // 筋トレの有無はYes/No選択式
       _fixedQueue.add(const _Question(
-        '今日、筋トレをしましたか？',
-        choices: ['はい', 'いいえ'],
+        '今日の運動内容を教えてください。',
         key: 'exercise',
       ));
     }

@@ -1,0 +1,151 @@
+/**
+ * Firestoreにモックデータを投入するスクリプト
+ *
+ * 使い方:
+ *   1. npm install firebase-admin
+ *   2. FirebaseコンソールからサービスアカウントキーJSONをダウンロードし
+ *      このファイルと同じディレクトリに serviceAccountKey.json として配置
+ *   3. UID を下の MOCK_UID に設定（アプリを一度起動して確認するか、任意の文字列でOK）
+ *   4. node scripts/seed_firestore.js
+ */
+
+const admin = require('firebase-admin');
+const serviceAccount = require('./serviceAccountKey.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+const db = admin.firestore();
+
+// ── 設定 ──────────────────────────────────────────────────────────
+const MOCK_UID = 'mock_user_001'; // 投入先のユーザーUID
+// ─────────────────────────────────────────────────────────────────
+
+const mockEntries = {
+  '2026-03-08': {
+    diary: '日曜日は家の掃除から始まった。午後はカフェで読書。初めて注文を英語でしてみたが、店員さんが普通に対応してくれて少し拍子抜け。夜は友人とゲームで盛り上がり、気づけば23時を過ぎていた。',
+    answers: {
+      morning: '洗濯と部屋の掃除をした',
+      afternoon: '近所のカフェで本を読んだ',
+      evening: '友人とオンラインゲームをした',
+      sleep: '7時間',
+      food: '朝：トースト、卵焼き / 昼：カフェのパスタ / 夜：冷凍チャーハン',
+      exercise: 'ジョギング20分',
+      study: '英単語を50個復習した',
+      custom_0: 'いいえ',
+      custom_1: 'カフェで初めてオーダーを全部英語でしてみた',
+    },
+  },
+  '2026-03-09': {
+    diary: '月曜は授業が詰まっている。午後は図書館の自習室を初めて予約してレポートを書き上げた。静かで集中できてよかった。夜は鍋を作ったものの、疲れて早々に就寝。',
+    answers: {
+      morning: '授業（統計学・線形代数）',
+      afternoon: '図書館で課題レポートを書いた',
+      evening: '夕食後すぐ寝てしまった',
+      sleep: '6時間',
+      food: '朝：コンビニのおにぎり2個 / 昼：学食のカレー / 夜：鍋（一人）',
+      exercise: 'なし',
+      study: '統計学の課題レポート（仮説検定の章）',
+      custom_0: 'はい',
+      custom_1: '図書館の自習室を初めて予約して使った',
+    },
+  },
+  '2026-03-10': {
+    diary: '午後は研究室でPythonのバグと格闘。groupbyでつまずいていたが、ドキュメントを読み込んでついに解決。夜はジムでランニング。体を動かすとやはり気分がすっきりする。',
+    answers: {
+      morning: '授業（プログラミング演習）',
+      afternoon: '研究室でPythonのデバッグ作業',
+      evening: 'ジムでランニングとストレッチ',
+      sleep: '7時間',
+      food: '朝：ヨーグルト、バナナ / 昼：コンビニのサンドイッチ / 夜：鶏むね肉の照り焼き（自炊）',
+      exercise: 'ランニング30分・ストレッチ15分',
+      study: 'Pythonのpandasライブラリ（groupbyの使い方）',
+      custom_0: 'いいえ',
+      custom_1: 'pandasのgroupbyを初めて使いこなせた',
+    },
+  },
+  '2026-03-11': {
+    diary: '寝坊してファミレスモーニングからスタート。午後は散歩と昼寝でゆるやかに過ごし、夜は友人と久々に外食。居酒屋で苦手なレバーを出されたが、今日は不思議と食べられた。',
+    answers: {
+      morning: 'オンライン講義（機械学習入門）の視聴',
+      afternoon: '近所を30分散歩してから昼寝',
+      evening: '友人と居酒屋に行った',
+      sleep: '5時間',
+      food: '朝：なし（寝坊）/ 昼：ファミレスのモーニング / 夜：居酒屋で唐揚げ・枝豆など',
+      exercise: '散歩30分',
+      study: '機械学習の決定木アルゴリズム（動画2本分）',
+      custom_0: 'いいえ',
+      custom_1: '居酒屋で苦手なレバーを初めて完食できた',
+    },
+  },
+  '2026-03-12': {
+    diary: '木曜は図書館でデータ構造の勉強に集中した日。ヒープを手書きで実装してみたら意外とすらすら書けて自信がついた。夜は早めに切り上げてゆっくり休んだ。',
+    answers: {
+      morning: '授業（英語・データ構造）',
+      afternoon: '図書館で試験勉強',
+      evening: '帰宅後すぐ入浴・読書',
+      sleep: '8時間',
+      food: '朝：食パン、目玉焼き / 昼：学食の日替わり定食 / 夜：コンビニのパスタ',
+      exercise: 'なし',
+      study: 'データ構造（ヒープ・優先度付きキュー）の試験対策',
+      custom_0: 'はい',
+      custom_1: 'ヒープの実装を手書きで1から書いてみた',
+    },
+  },
+  '2026-03-13': {
+    diary: '金曜は小テストとバイトで慌ただしかった。まかないのカレーが美味しくて疲れが吹っ飛んだ。帰宅後は即就寝。体力の限界だった。',
+    answers: {
+      morning: '授業（確率論）・小テスト',
+      afternoon: 'カフェでアルバイト（16〜21時）',
+      evening: '帰宅後シャワーを浴びて就寝',
+      sleep: '6時間',
+      food: '朝：コンビニのカップ麺 / 昼：学食のラーメン / 夜：アルバイト先でまかない（カレー）',
+      exercise: 'なし',
+      study: '授業中に確率論の復習ノートを整理した',
+      custom_0: 'いいえ',
+      custom_1: 'バイト中に常連さんから新メニューの感想を自分から聞いてみた',
+    },
+  },
+  '2026-03-14': {
+    diary: '土曜日はハッカソンデー。午後からFlutterとGemini APIの連携に取り組み、ついにAIが返答するところまで動いた。ピザで英気を養いながら夜まで集中。初めてAIアプリが動いた瞬間は感動だった。',
+    answers: {
+      morning: 'ゆっくり起床・Youtubeを見ながらストレッチ',
+      afternoon: 'ハッカソンの作業（Flutterアプリ開発）',
+      evening: '作業の続き・レビュー準備',
+      sleep: '9時間以上',
+      food: '朝：ホットケーキ / 昼：デリバリーのピザ / 夜：カップ麺',
+      exercise: 'ストレッチ10分',
+      study: 'FlutterとFirestoreの連携・Gemini APIの使い方',
+      custom_0: 'いいえ',
+      custom_1: 'Gemini APIを使ったアプリを初めて動かせた',
+    },
+  },
+};
+
+async function seed() {
+  const batch = db.batch();
+
+  for (const [date, data] of Object.entries(mockEntries)) {
+    const ref = db
+      .collection('users')
+      .doc(MOCK_UID)
+      .collection('entries')
+      .doc(date);
+
+    batch.set(ref, {
+      diary: data.diary,
+      answers: data.answers,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  await batch.commit();
+  console.log(`✓ ${Object.keys(mockEntries).length}件のモックデータを投入しました（UID: ${MOCK_UID}）`);
+  process.exit(0);
+}
+
+seed().catch((err) => {
+  console.error('エラー:', err);
+  process.exit(1);
+});
