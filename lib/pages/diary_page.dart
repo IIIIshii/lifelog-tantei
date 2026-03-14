@@ -67,6 +67,7 @@ class _DiaryPageState extends State<DiaryPage> {
   List<String>? _currentChoices; // 現在表示中の選択肢。nullのときはテキスト入力を表示
   String? _pendingKey; // 直前のAI質問のキー（次のユーザー回答をanswersに紐づけるため）
   final Map<String, String> _answers = {}; // 質問キー → 回答テキストのマップ
+  final Map<String, double> _numericAnswers = {}; // 質問キー → 数値回答のマップ
 
   late final GeminiService _gemini;
   final AuthService _auth = AuthService();
@@ -358,6 +359,10 @@ class _DiaryPageState extends State<DiaryPage> {
     // 直前の質問にキーがあれば回答をanswersマップに記録する
     if (_pendingKey != null) {
       _answers[_pendingKey!] = text;
+      if (_pendingKey == 'sleep') {
+        final hours = _parseSleepHours(text);
+        if (hours != null) _numericAnswers['sleep'] = hours;
+      }
       _pendingKey = null;
     }
 
@@ -530,7 +535,8 @@ class _DiaryPageState extends State<DiaryPage> {
               additionalContext: additionalContext);
       await Future.wait([
         _firestore.saveDiary(_uid!, _today!, diary),
-        _firestore.saveAnswers(_uid!, _today!, _answers),
+        _firestore.saveAnswers(_uid!, _today!, _answers,
+            numericAnswers: _numericAnswers),
       ]);
       _postAiMessage('日記を生成しました。ご確認ください。');
       setState(() {
@@ -591,6 +597,17 @@ class _DiaryPageState extends State<DiaryPage> {
         );
       }).toList(),
     );
+  }
+
+  // 睡眠時間の文字列を時間数（double）にパースする
+  // 例: "7時間" → 7.0 / "7.5時間" → 7.5 / "〜4時間" → 4.0 / "13時間〜" → 13.0
+  // 数値が取れない場合は null を返す
+  double? _parseSleepHours(String text) {
+    if (text == '〜4時間') return 4.0;
+    if (text == '13時間〜') return 13.0;
+    final match = RegExp(r'(\d+(?:\.\d+)?)時間').firstMatch(text);
+    if (match != null) return double.tryParse(match.group(1)!);
+    return double.tryParse(text);
   }
 
   // エラーダイアログを表示する

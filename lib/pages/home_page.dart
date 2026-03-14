@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../core/theme/detective_theme.dart';
 import '../services/auth_service.dart';
 import 'diary_page.dart';
+import 'analytics_page.dart';
 import 'diary_list_page.dart';
 import 'settings_page.dart';
 
@@ -99,7 +100,11 @@ class _HomePageState extends State<HomePage> {
               icon: Icons.analytics,
               title: '証拠分析室',
               subtitle: '（習慣や行動をグラフで見る）',
-              onTap: () => _showComingSoon(context, '活動の記録'),
+              onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const AnalyticsPage()),
+                  ),
             ),
             const SizedBox(height: 16),
             _CaseFileCard(
@@ -118,22 +123,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // 未実装機能のダイアログを表示する
-  void _showComingSoon(BuildContext context, String feature) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(feature),
-        content: const Text('この機能は近日公開予定です。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // ──────────────────────────────────────────────────────────────
