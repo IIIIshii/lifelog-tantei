@@ -25,7 +25,10 @@ class DiaryListPage extends StatelessWidget {
           if (snapshot.hasError) {
             return Center(child: Text('エラー: ${snapshot.error}'));
           }
-          final docs = snapshot.data?.docs ?? [];
+          // diary フィールドがないドキュメント（会話途中で終わったもの等）を除外する
+          final docs = (snapshot.data?.docs ?? [])
+              .where((d) => (d.data() as Map<String, dynamic>)['diary'] != null)
+              .toList();
           if (docs.isEmpty) {
             return const Center(child: Text('まだ日記がありません'));
           }
@@ -35,7 +38,7 @@ class DiaryListPage extends StatelessWidget {
             itemBuilder: (context, index) {
               final data = docs[index].data() as Map<String, dynamic>;
               final date = docs[index].id; // ドキュメントIDが日付（YYYY-MM-DD）
-              final diary = data['diary'] as String? ?? '';
+              final diary = data['diary'] as String;
               return ListTile(
                 leading: const Icon(Icons.book),
                 title: Text(date),
