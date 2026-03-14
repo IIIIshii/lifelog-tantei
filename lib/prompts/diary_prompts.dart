@@ -20,8 +20,13 @@ class DiaryPrompts {
   }
 
   /// 会話全体から日記を生成するプロンプト
-  static String generateDiary(String conversationHistory) {
-    return '以下の会話を元に、ユーザーの視点で100〜300字の自然な日記を生成してください。\n\n'
+  /// additionalContext: カスタム質問や思い出しアシストの回答を含む追加情報
+  static String generateDiary(String conversationHistory,
+      {String additionalContext = ''}) {
+    final extra = additionalContext.isNotEmpty
+        ? '\n\n【参考情報】\n$additionalContext'
+        : '';
+    return '以下の会話を元に、ユーザーの視点で100〜300字の自然な日記を生成してください。$extra\n\n'
         '$conversationHistory';
   }
 

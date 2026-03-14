@@ -26,11 +26,14 @@ class GeminiService {
     return response.text ?? 'もう少し詳しく教えてください。';
   }
 
-  // 会話履歴全体から日記テキストをGeminiに生成させる
-  Future<String> generateDiary(List<Map<String, String>> messages) async {
+  // 会話履歴から日記テキストをGeminiに生成させる
+  // additionalContext: カスタム質問・思い出しアシストの回答など、追加で含めるコンテキスト
+  Future<String> generateDiary(List<Map<String, String>> messages,
+      {String additionalContext = ''}) async {
     final history = _buildHistory(messages);
     final response = await _model.generateContent([
-      Content.text(DiaryPrompts.generateDiary(history)),
+      Content.text(DiaryPrompts.generateDiary(history,
+          additionalContext: additionalContext)),
     ]);
     return response.text ?? '日記を生成できませんでした。';
   }
