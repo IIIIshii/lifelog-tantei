@@ -43,6 +43,19 @@ class FirestoreService {
     return null;
   }
 
+  // 指定日の会話メッセージ数を返す（追記時のconversationOrderオフセット計算に使う）
+  Future<int> getMessageCount(String uid, String date) async {
+    final snap = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('entries')
+        .doc(date)
+        .collection('conversation')
+        .count()
+        .get();
+    return snap.count ?? 0;
+  }
+
   // 会話の1メッセージをFirestoreに保存する（順序orderで並び替えできるようにする）
   Future<void> saveMessage(
       String uid, String date, String role, String text, int order) async {
