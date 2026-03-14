@@ -94,24 +94,12 @@ class _HomePageState extends State<HomePage> {
                       ),
             ),
             const SizedBox(height: 16),
-<<<<<<< HEAD
-            _MenuCard(
-              icon: Icons.bar_chart,
-              title: '活動の記録',
-              subtitle: '習慣や行動をグラフで見る',
-              color: const Color(0xFF2E4A5C),
-              onTap: () => _showComingSoon(context, '活動の記録'),
-=======
             _CaseFileCard(
               caseNumber: 'No.03',
               icon: Icons.analytics,
               title: '証拠分析室',
               subtitle: '（習慣や行動をグラフで見る）',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ActivityPage()),
-              ),
->>>>>>> 07a956b (メイン画面のUIを試しに実装)
+              onTap: () => _showComingSoon(context, '活動の記録'),
             ),
             const SizedBox(height: 16),
             _CaseFileCard(
@@ -129,7 +117,6 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-<<<<<<< HEAD
 
   // 未実装機能のダイアログを表示する
   void _showComingSoon(BuildContext context, String feature) {
@@ -149,11 +136,6 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// ホーム画面の各メニュー項目を表すカードウィジェット
-class _MenuCard extends StatelessWidget {
-=======
-}
-
 // ──────────────────────────────────────────────────────────────
 // マニラフォルダー風カード
 //
@@ -162,7 +144,6 @@ class _MenuCard extends StatelessWidget {
 // ──────────────────────────────────────────────────────────────
 class _CaseFileCard extends StatelessWidget {
   final String caseNumber;
->>>>>>> 07a956b (メイン画面のUIを試しに実装)
   final IconData icon;
   final String title;
   final String subtitle;
