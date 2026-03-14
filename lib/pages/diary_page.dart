@@ -106,9 +106,13 @@ class _DiaryPageState extends State<DiaryPage> {
 
       final existingDiary = await _firestore.getTodayDiary(_uid!, _today!);
       if (existingDiary != null) {
+        _conversationOrder = await _firestore.getMessageCount(_uid!, _today!);
+        const message = '今日の事件簿がすでにあります。どうしますか？';
+        await _firestore.saveMessage(
+            _uid!, _today!, 'ai', message, _conversationOrder++);
         setState(() {
           _existingDiary = existingDiary;
-          _messages.add({'role': 'ai', 'text': '今日の事件簿がすでにあります。どうしますか？'});
+          _messages.add({'role': 'ai', 'text': message});
           _showExistingDiaryChoice = true;
         });
         return;
@@ -126,8 +130,12 @@ class _DiaryPageState extends State<DiaryPage> {
 
   // 既存の日記がある場合の選択肢（追記 or 確認）を処理する
   Future<void> _handleExistingDiaryChoice(String choice) async {
-    setState(() => _showExistingDiaryChoice = false);
-    _messages.add({'role': 'user', 'text': choice});
+    await _firestore.saveMessage(
+        _uid!, _today!, 'user', choice, _conversationOrder++);
+    setState(() {
+      _showExistingDiaryChoice = false;
+      _messages.add({'role': 'user', 'text': choice});
+    });
 
     if (choice == '日記を確認する') {
       setState(() {
