@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../models/user_settings.dart';
+import '../prompts/diary_prompts.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
@@ -11,14 +12,12 @@ import '../widgets/input_area.dart';
 import 'diary_list_page.dart';
 
 // 質問フェーズを表す列挙型
-// fixed        : 設定ベースの固定質問（睡眠/食事/運動/勉強/recallAssist）
-// eventQuestions: 出来事の構造化質問（いつ/どこで/誰が/誰と/何をした/どうだった）
-// ai           : AIによる追加質問（1回）
-// addendum     : 追記事項の確認
-// custom       : ユーザー定義のカスタム質問
-// confirm      : 「これでいいですか？」の確認ステップ（ボタンUI）
-// done         : 全質問完了・日記生成待ち
-enum _Phase { fixed, eventQuestions, ai, addendum, custom, confirm, done }
+// opening    : セッション開幕（探偵のオープニングセリフを表示）
+// aiFollowUp : AIによる深堀り質問（3問目安、DONEで早期終了）
+// fixed      : 設定ベースの固定質問（睡眠/食事/運動/勉強/recallAssist）
+// custom     : ユーザー定義のカスタム質問
+// done       : 全質問完了・日記生成中/生成済み
+enum _Phase { opening, aiFollowUp, fixed, custom, done }
 
 // 今日の日記を作成するページ。AIとの対話を通じて日記を生成する
 class DiaryPage extends StatefulWidget {
@@ -42,20 +41,10 @@ class _DiaryPageState extends State<DiaryPage> {
   final AuthService _auth = AuthService();
   final FirestoreService _firestore = FirestoreService();
 
-  _Phase _phase = _Phase.fixed;
+  _Phase _phase = _Phase.opening;
+  int _aiFollowUpCount = 0; // AI深堀り質問の回数（3問目安）
   final Queue<String> _fixedQueue = Queue(); // 設定から生成した固定質問のキュー
-  final Queue<String> _eventQueue = Queue(); // 出来事の構造化質問のキュー
   final Queue<String> _customQueue = Queue(); // ユーザー定義のカスタム質問のキュー
-
-  // 出来事についての構造化された固定質問リスト
-  static const List<String> _eventQuestions = [
-    'それはいつの出来事ですか？',
-    'どこでありましたか？',
-    'その出来事の主な登場人物は誰ですか？',
-    '誰かと一緒でしたか？',
-    '具体的に何をしましたか？',
-    'どんな気分・感想でしたか？',
-  ];
 
   @override
   void initState() {
@@ -89,7 +78,8 @@ class _DiaryPageState extends State<DiaryPage> {
 
       final settings = await _firestore.getUserSettings(_uid!);
       _buildQueues(settings);
-      await _askNext();
+      // openingフェーズ：探偵のオープニングセリフを投稿して返答を待つ
+      _postAiMessage(DiaryPrompts.openingLine);
     } catch (e) {
       _showError('初期化エラー: $e');
     } finally {
@@ -98,9 +88,10 @@ class _DiaryPageState extends State<DiaryPage> {
   }
 
   // ユーザー設定を元に固定質問キューとカスタム質問キューを構築する
+  // 出来事の構造化質問（いつ/どこで等）はAI深堀りで自然にカバーするため含めない
   void _buildQueues(UserSettings settings) {
     if (settings.recallAssist) {
-      // 思い出しアシストONの場合、時間帯別の質問を3問追加する
+      // 思い出しアシストONの場合、時間帯別の質問を追加する
       _fixedQueue.addAll([
         '午前中は何をしていましたか？',
         '午後は何をしていましたか？',
@@ -120,10 +111,6 @@ class _DiaryPageState extends State<DiaryPage> {
       _fixedQueue.add('今日の勉強内容を教えてください。');
     }
 
-    // 出来事の構造化質問を冒頭に「記録したい出来事についてお聞きします」を付けてキューへ
-    _eventQueue.add('記録したい出来事についてお聞きします。');
-    _eventQueue.addAll(_eventQuestions);
-
     for (final q in settings.customQuestions) {
       _customQueue.add(q);
     }
@@ -132,36 +119,24 @@ class _DiaryPageState extends State<DiaryPage> {
   // 現在のフェーズに応じて次の質問をする
   Future<void> _askNext() async {
     switch (_phase) {
+      case _Phase.opening:
+        break; // openingはユーザー返答待ちのため何もしない
+      case _Phase.aiFollowUp:
+        await _askAiFollowUp();
       case _Phase.fixed:
         if (_fixedQueue.isNotEmpty) {
           _postAiMessage(_fixedQueue.removeFirst());
         } else {
-          _phase = _Phase.eventQuestions;
+          _phase = _Phase.custom;
           await _askNext();
         }
-      case _Phase.eventQuestions:
-        if (_eventQueue.isNotEmpty) {
-          _postAiMessage(_eventQueue.removeFirst());
-        } else {
-          // 構造化質問が終わったらAIの追加質問フェーズへ
-          _phase = _Phase.ai;
-          await _askAiFollowUp();
-        }
-      case _Phase.addendum:
-        _postAiMessage('追記したいことはありますか？（なければ「なし」と入力してください）');
       case _Phase.custom:
         if (_customQueue.isNotEmpty) {
           _postAiMessage(_customQueue.removeFirst());
         } else {
-          _phase = _Phase.confirm;
-          await _askNext();
+          // 全質問終了後、確認なしで直接日記を生成する
+          await _generateDiary();
         }
-      case _Phase.ai:
-        break; // AIフェーズは _askAiFollowUp() で直接呼ぶため_askNext()では何もしない
-      case _Phase.confirm:
-        // 確認ステップはボタンUIで表示するためメッセージだけ投稿する
-        _postAiMessage('以上で質問は終わりです。この内容で日記を生成しますか？');
-        setState(() {});
       case _Phase.done:
         break;
     }
@@ -183,34 +158,42 @@ class _DiaryPageState extends State<DiaryPage> {
     setState(() => _messages.add({'role': 'user', 'text': text}));
 
     switch (_phase) {
+      case _Phase.opening:
+        // 最初の返答を受け取ったらAI深堀りフェーズへ移行する
+        _phase = _Phase.aiFollowUp;
+        await _askAiFollowUp();
+      case _Phase.aiFollowUp:
+        // AI深堀りフェーズでは次の深堀り質問を生成（またはフェーズ終了）する
+        await _askAiFollowUp();
       case _Phase.fixed:
-        await _askNext();
-      case _Phase.eventQuestions:
-        // 冒頭の「記録したい出来事について〜」はユーザー返答不要なのでスキップ済み
-        // 各構造化質問への回答後、次の質問へ進む
-        await _askNext();
-      case _Phase.ai:
-        // AI追加質問への返答後は追記フェーズへ
-        _phase = _Phase.addendum;
-        await _askNext();
-      case _Phase.addendum:
-        // 追記後はカスタム質問フェーズへ
-        _phase = _Phase.custom;
         await _askNext();
       case _Phase.custom:
         await _askNext();
-      case _Phase.confirm:
-        break; // confirmフェーズはボタンで操作するため入力は無視
       case _Phase.done:
         break;
     }
   }
 
-  // Geminiに追加質問を生成させる（AIフェーズで1回呼ばれる）
+  // Geminiに深堀り質問を生成させる。3問を目安に呼ばれ、
+  // DONEシグナル（null返却）または上限到達で次のフェーズ（固定質問）へ自動遷移する
   Future<void> _askAiFollowUp() async {
+    // 3問を目安に達した場合は固定質問フェーズへ移行する
+    if (_aiFollowUpCount >= 3) {
+      _phase = _Phase.fixed;
+      await _askNext();
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       final followUp = await _gemini.generateFollowUp(_messages);
+      if (followUp == null) {
+        // GeminiがDONEを返した＝情報収集完了と判断。固定質問フェーズへ遷移する
+        _phase = _Phase.fixed;
+        await _askNext();
+        return;
+      }
+      _aiFollowUpCount++;
       await _firestore.saveMessage(
           _uid!, _today!, 'ai', followUp, _conversationOrder++);
       setState(() => _messages.add({'role': 'ai', 'text': followUp}));
@@ -261,13 +244,10 @@ class _DiaryPageState extends State<DiaryPage> {
   @override
   Widget build(BuildContext context) {
     final lastIsAI = _messages.isNotEmpty && _messages.last['role'] == 'ai';
-    // confirmフェーズはボタンUIを出すためテキスト入力を非表示にする
     final showInput = !_diaryGenerated &&
         !_isLoading &&
         lastIsAI &&
-        _phase != _Phase.confirm &&
         _phase != _Phase.done;
-    final showConfirmButton = _phase == _Phase.confirm && !_isLoading;
 
     return Scaffold(
       appBar: AppBar(
@@ -308,29 +288,6 @@ class _DiaryPageState extends State<DiaryPage> {
             const Padding(
               padding: EdgeInsets.all(8.0),
               child: CircularProgressIndicator(),
-            ),
-          // 「これでいいですか？」確認ボタン
-          if (showConfirmButton)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _generateDiary,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF5C3D2E),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'はい、日記を生成する',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                ),
-              ),
             ),
           if (showInput)
             InputArea(controller: _textController, onSubmit: _sendUserReply),
