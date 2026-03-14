@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -22,6 +23,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _isLoading = true;
   bool _isSaving = false; // 保存中フラグ（AppBarにスピナーを表示するために使用）
   bool _isExporting = false;
+  bool _isSeeding = false;
 
   final AuthService _auth = AuthService();
   final FirestoreService _firestore = FirestoreService();
@@ -115,6 +117,22 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     } finally {
       setState(() => _isExporting = false);
+    }
+  }
+
+  // モックデータを書き込む（デバッグビルドのみ表示）
+  Future<void> _seedMockData() async {
+    if (_uid == null) return;
+    setState(() => _isSeeding = true);
+    try {
+      await _firestore.seedMockData(_uid!);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('モックデータを書き込みました')),
+        );
+      }
+    } finally {
+      setState(() => _isSeeding = false);
     }
   }
 
@@ -319,6 +337,52 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 28),
 
                 // ── セクション3: データ管理 ──────────────────────
+                // デバッグビルドのみシードボタンを表示する
+                if (kDebugMode) ...[
+                  const _SectionHeader(
+                    title: '◆ デバッグ',
+                    subtitle: 'デバッグビルドのみ表示',
+                  ),
+                  const SizedBox(height: 8),
+                  _SettingsCard(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.bug_report_outlined,
+                            color: DetectiveTheme.gold),
+                        title: const Text(
+                          'モックデータを書き込む',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: DetectiveTheme.textPrimary,
+                          ),
+                        ),
+                        subtitle: const Text(
+                          '直近7日分のサンプル日記を上書き保存します',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: DetectiveTheme.textSecondary,
+                          ),
+                        ),
+                        trailing: _isSeeding
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  color: DetectiveTheme.gold,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.chevron_right,
+                                color: DetectiveTheme.textSecondary),
+                        onTap: _isSeeding ? null : _seedMockData,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                ],
+
+                // ── セクション: エクスポート ──────────────────────
                 const _SectionHeader(
                   title: '◆ データ管理',
                   subtitle: '日記データをCSVファイルでエクスポート',
