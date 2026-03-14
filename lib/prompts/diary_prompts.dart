@@ -1,41 +1,24 @@
-// Geminiへ投げるプロンプト文字列を一元管理するクラス。ロール変更はここだけ触ればOK
+// 日記生成プロンプトのテンプレートを組み立てるクラス。
+// 生成ルールや口調の指示は ai_instructions.dart に、
+// 会話履歴の差し込み方などテンプレート構造はここで管理する。
 class DiaryPrompts {
-  /// 今日の出来事についての最初の質問を生成するプロンプト
-  static String firstQuestion() {
-    return '今日の日記を書くためのインタビューをします。'
-        'ユーザーに今日の出来事について、親しみやすく短い質問を1つだけしてください。';
-  }
+  DiaryPrompts._();
 
-  /// 会話の流れを受けて深堀り質問を生成するプロンプト
-  static String followUp(String conversationHistory) {
-    return '以下は日記インタビューの会話です:\n$conversationHistory\n\n'
-        'ユーザーの回答に対して、もう少し詳しく聞く自然な深堀り質問を1つだけしてください。';
-  }
-
-  /// カスタム質問について深堀りするプロンプト
-  static String customFollowUp(String question, String conversationHistory) {
-    return '以下は日記インタビューの会話です:\n$conversationHistory\n\n'
-        'ユーザーが「$question」という質問に答えました。'
-        'この回答に対して自然な深堀り質問を1つだけしてください。';
-  }
-
-  /// 会話全体から日記を生成するプロンプト
-  /// additionalContext: カスタム質問や思い出しアシストの回答を含む追加情報
-  static String generateDiary(String conversationHistory,
+  // 会話履歴から日記生成プロンプトを組み立てる。
+  // additionalContext: カスタム質問・思い出しアシストの回答など
+  static String buildDiaryPrompt(String conversationHistory,
       {String additionalContext = ''}) {
     final extra = additionalContext.isNotEmpty
-        ? '\n\n【参考情報】\n$additionalContext'
+        ? '\n\n【参考情報（日記に自然に織り込むこと）】\n$additionalContext'
         : '';
-    return '以下の会話を元に、ユーザーの視点で100〜300字の自然な日記を生成してください。$extra\n\n'
-        '$conversationHistory';
+    return '以下が依頼人の証言です：\n$conversationHistory$extra';
   }
 
-  /// 既存の日記と追記インタビューの会話を統合して日記を生成するプロンプト
-  static String generateDiaryWithExisting(
+  // 既存日記と追記インタビューを統合する日記生成プロンプトを組み立てる。
+  static String buildDiaryWithExistingPrompt(
       String existingDiary, String conversationHistory) {
-    return '以下は今日すでに書かれた日記です:\n$existingDiary\n\n'
-        'そして以下は、追加で行ったインタビューの会話です:\n$conversationHistory\n\n'
-        'これらの内容を統合して、ユーザーの視点で100〜300字の自然な日記を1つ生成してください。'
-        '既存の日記の内容も含め、追記分の内容も自然に反映させてください。';
+    return '以下は今日すでに記録された捜査ログです：\n$existingDiary\n\n'
+        '以下は追加で得られた証言です：\n$conversationHistory\n\n'
+        '二つの内容を自然に統合し、捜査ログとして再記録してください。';
   }
 }

@@ -432,10 +432,17 @@ class _DiaryPageState extends State<DiaryPage> {
   }
 
   // Geminiに追加質問を生成させる（AIフェーズで1回呼ばれる）
+  // Geminiが「DONE」を返した場合はフォローアップをスキップしてaddendumへ進む
   Future<void> _askAiFollowUp() async {
     setState(() => _isLoading = true);
     try {
       final followUp = await _gemini.generateFollowUp(_messages);
+      if (followUp == null) {
+        // 証言十分と判断されたためフォローアップをスキップ
+        _phase = _Phase.addendum;
+        await _askNext();
+        return;
+      }
       await _firestore.saveMessage(
           _uid!, _today!, 'ai', followUp, _conversationOrder++);
       setState(() {
