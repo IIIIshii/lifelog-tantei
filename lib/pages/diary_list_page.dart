@@ -81,7 +81,7 @@ class DiaryListPage extends StatelessWidget {
             itemBuilder: (context, index) {
               final data = docs[index].data() as Map<String, dynamic>;
               final date = docs[index].id; // ドキュメントIDが日付（YYYY-MM-DD）
-              final diary = data['diary'] as String? ?? '';
+              final diary = data['diary'] as String;
 
               // タップで日記詳細ページへ遷移する
               return _CaseArchiveItem(

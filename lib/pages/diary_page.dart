@@ -171,7 +171,7 @@ class _DiaryPageState extends State<DiaryPage> {
       case _Phase.fixed:
         if (_fixedQueue.isNotEmpty) {
           final q = _fixedQueue.removeFirst();
-          _postAiMessage(q.text, choices: q.choices);
+          _postAiMessage(q.text, choices: q.choices, key: q.key);
         } else {
           _phase = _Phase.eventQuestions;
           await _askNext();
@@ -179,7 +179,7 @@ class _DiaryPageState extends State<DiaryPage> {
       case _Phase.eventQuestions:
         if (_eventQueue.isNotEmpty) {
           final q = _eventQueue.removeFirst();
-          _postAiMessage(q.text, choices: q.choices);
+          _postAiMessage(q.text, choices: q.choices, key: q.key);
         } else {
           // 構造化質問が終わったらAIの追加質問フェーズへ
           _phase = _Phase.ai;
@@ -191,7 +191,7 @@ class _DiaryPageState extends State<DiaryPage> {
       case _Phase.custom:
         if (_customQueue.isNotEmpty) {
           final q = _customQueue.removeFirst();
-          _postAiMessage(q.text, choices: q.choices);
+          _postAiMessage(q.text, choices: q.choices, key: q.key);
         } else {
           _phase = _Phase.confirm;
           await _askNext();
@@ -404,7 +404,7 @@ class _DiaryPageState extends State<DiaryPage> {
                   return ElevatedButton(
                     onPressed: () => _sendUserReply(choice),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF5C3D2E),
+                      backgroundColor: DetectiveTheme.gold,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
