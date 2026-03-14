@@ -98,13 +98,12 @@ class FirestoreService {
     }, SetOptions(merge: true));
   }
 
-  // 日記エントリを新しい順（日付降順）で取得するクエリを返す
-  // ドキュメントIDがYYYY-MM-DD形式のため、FieldPath.documentId()で辞書順=日付順に並ぶ
+  // 日記エントリ一覧を取得するクエリを返す
+  // ソートはクライアント側でドキュメントID（YYYY-MM-DD）の降順で行う
   Query<Map<String, dynamic>> entriesQuery(String uid) {
     return _db
         .collection('users')
         .doc(uid)
-        .collection('entries')
-        .orderBy(FieldPath.documentId, descending: true);
+        .collection('entries');
   }
 }

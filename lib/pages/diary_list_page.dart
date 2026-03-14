@@ -49,10 +49,12 @@ class DiaryListPage extends StatelessWidget {
           if (snapshot.hasError) {
             return Center(child: Text('エラー: ${snapshot.error}'));
           }
-          // diary フィールドがないドキュメント（会話途中で終わったもの等）を除外する
+          // diary フィールドがないドキュメント（会話途中で終わったもの等）を除外し、
+          // ドキュメントID（YYYY-MM-DD）の降順（新しい順）でクライアントソートする
           final docs = (snapshot.data?.docs ?? [])
               .where((d) => (d.data() as Map<String, dynamic>)['diary'] != null)
-              .toList();
+              .toList()
+            ..sort((a, b) => b.id.compareTo(a.id));
           if (docs.isEmpty) {
             return const Center(
               child: Column(
