@@ -24,7 +24,11 @@ class GeminiService {
     // 「DONE」はバックエンド専用の終了シグナル。ユーザーには表示しない。
     if (text.toUpperCase() == 'DONE') return null;
 
-    return text.isEmpty ? null : text;
+    // APIの一時的な無回答やフィルタで空になった場合はDONEとは区別し、
+    // フォールバック質問を返して質問フェーズを継続する
+    if (text.isEmpty) return 'もう少し詳しく聞かせてくれないか。';
+
+    return text;
   }
 
   // ── 捜査ログ（日記）生成 ───────────────────────────────────
