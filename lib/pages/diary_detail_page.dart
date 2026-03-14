@@ -1,13 +1,22 @@
 import 'package:flutter/material.dart';
 import '../core/theme/detective_theme.dart';
+import '../services/firestore_service.dart';
+import 'diary_edit_page.dart';
 
 // 特定の日の日記を事件報告書として全文表示する詳細ページ
 class DiaryDetailPage extends StatelessWidget {
-  final String date;  // 表示する日付（YYYY-MM-DD）
-  final String diary; // 表示する日記テキスト
+  final String date;               // 表示する日付（YYYY-MM-DD）
+  final String diary;              // 表示する日記テキスト
+  final String uid;                // 編集保存に必要なユーザーID
+  final FirestoreService firestore;
 
-  const DiaryDetailPage(
-      {super.key, required this.date, required this.diary});
+  const DiaryDetailPage({
+    super.key,
+    required this.date,
+    required this.diary,
+    required this.uid,
+    required this.firestore,
+  });
 
   // YYYY-MM-DD → YYYY年MM月DD日 に整形する（diary_list_pageと同じ形式）
   String _formatDate(String raw) {
@@ -40,7 +49,9 @@ class DiaryDetailPage extends StatelessWidget {
       ),
 
       // ── Body ────────────────────────────────────────────────
-      body: SingleChildScrollView(
+      body: Column(
+        children: [
+          Expanded(child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Container(
           decoration: BoxDecoration(
@@ -111,7 +122,37 @@ class DiaryDetailPage extends StatelessWidget {
               ),
             ],
           ),
-        ),
+          ))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => DiaryEditPage(
+                      uid: uid,
+                      today: date,
+                      firestore: firestore,
+                      initialDiary: diary,
+                    ),
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: DetectiveTheme.gold,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(4)),
+                ),
+                child: const Text('編集する',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
