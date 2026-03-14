@@ -1,24 +1,115 @@
 import 'package:flutter/material.dart';
+import '../core/theme/detective_theme.dart';
 
-// 特定の日の日記を全文表示する詳細ページ
+// 特定の日の日記を事件報告書として全文表示する詳細ページ
 class DiaryDetailPage extends StatelessWidget {
-  final String date; // 表示する日付（YYYY-MM-DD）
+  final String date;  // 表示する日付（YYYY-MM-DD）
   final String diary; // 表示する日記テキスト
 
-  const DiaryDetailPage({super.key, required this.date, required this.diary});
+  const DiaryDetailPage(
+      {super.key, required this.date, required this.diary});
+
+  // YYYY-MM-DD → YYYY年MM月DD日 に整形する（diary_list_pageと同じ形式）
+  String _formatDate(String raw) {
+    final parts = raw.split('-');
+    if (parts.length != 3) return raw;
+    return '${parts[0]}年${parts[1]}月${parts[2]}日';
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(date)),
+      backgroundColor: DetectiveTheme.background,
+
+      // ── AppBar ──────────────────────────────────────────────
+      // 日付を整形して表示し、サブタイトルで「事件報告書」であることを示す
+      appBar: AppBar(
+        backgroundColor: DetectiveTheme.appBarBg,
+        foregroundColor: const Color(0xFFE8DCC8),
+        elevation: 0,
+        toolbarHeight: 64,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(_formatDate(date), style: DetectiveTheme.appBarTitle),
+            const SizedBox(height: 2),
+            const Text('― 事件報告書 ―',
+                style: DetectiveTheme.appBarSubtitle),
+          ],
+        ),
+      ),
+
+      // ── Body ────────────────────────────────────────────────
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Card(
-          color: Colors.amber[50],
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Text(diary,
-                style: const TextStyle(fontSize: 16, height: 1.8)),
+        padding: const EdgeInsets.all(20),
+        child: Container(
+          decoration: BoxDecoration(
+            color: DetectiveTheme.cardBg,
+            borderRadius: BorderRadius.circular(4),
+            // ゴールドの枠線でDiaryCardと同じ「重要書類」感を表現する
+            border: Border.all(color: DetectiveTheme.gold, width: 1.5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── ヘッダー行（DiaryCardと同じデザイン） ────────
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 10),
+                decoration: const BoxDecoration(
+                  border: Border(
+                      bottom: BorderSide(color: DetectiveTheme.gold)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.description,
+                        color: DetectiveTheme.gold, size: 16),
+                    const SizedBox(width: 6),
+                    const Text(
+                      '事件報告書',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: DetectiveTheme.gold,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const Spacer(),
+                    // CLOSEDバッジ
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: DetectiveTheme.gold),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                      child: const Text(
+                        'CLOSED',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: DetectiveTheme.gold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ── 日記本文（全文表示） ──────────────────────────
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text(
+                  diary,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: DetectiveTheme.textPrimary,
+                    height: 1.8, // 行間を広めにとって読みやすくする
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
