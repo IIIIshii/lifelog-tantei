@@ -46,6 +46,7 @@ class _DiaryPageState extends State<DiaryPage> {
   final List<Map<String, String>> _messages = []; // 画面に表示する会話履歴
   String? _diary; // 生成された日記テキスト
   String? _existingDiary; // 既存の日記テキスト（追記時に使用）
+  int _addendumStartIndex = 0; // 追記インタビュー開始時点の_messagesインデックス
   bool _isLoading = false;
   bool _diaryGenerated = false;
   bool _showExistingDiaryChoice = false; // 追記 or 確認の選択肢を表示するフラグ
@@ -145,7 +146,8 @@ class _DiaryPageState extends State<DiaryPage> {
       return;
     }
 
-    // 追記する → 通常の質問フローを開始
+    // 追記する → インタビュー開始インデックスを記録してから質問フローを開始
+    _addendumStartIndex = _messages.length;
     setState(() => _isLoading = true);
     try {
       final settings = await _firestore.getUserSettings(_uid!);
@@ -322,7 +324,8 @@ class _DiaryPageState extends State<DiaryPage> {
     });
     try {
       final diary = _existingDiary != null
-          ? await _gemini.generateDiaryWithExisting(_existingDiary!, _messages)
+          ? await _gemini.generateDiaryWithExisting(
+              _existingDiary!, _messages.sublist(_addendumStartIndex))
           : await _gemini.generateDiary(_messages);
       await Future.wait([
         _firestore.saveDiary(_uid!, _today!, diary),
