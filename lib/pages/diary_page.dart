@@ -85,17 +85,17 @@ class _DiaryPageState extends State<DiaryPage> {
   static const List<_Question> _eventQuestions = [
     _Question(
       'まず、それはいつの出来事ですか？',
-      choices: ['朝', '昼', '夜', '仕事中', '学校', 'プライベート', 'その他'],
+      choices: ['朝', '昼', '夜', '仕事中', '学校', 'プライベート', 'その他(自由記述)'],
       key: 'event_when',
     ),
     _Question(
       '次に、それはどこでの出来事ですか？',
-      choices: ['自宅', '学校', '職場', 'その他'],
+      choices: ['自宅', '学校', '職場', 'その他(自由記述)'],
       key: 'event_where',
     ),
     _Question(
       '誰についての出来事ですか？',
-      choices: ['自分', 'その他'],
+      choices: ['自分', 'その他(自由記述)'],
       key: 'event_who',
     ),
     _Question(
@@ -104,7 +104,7 @@ class _DiaryPageState extends State<DiaryPage> {
     ),
     _Question(
       'それを受けて、あなたはどう感じましたか？',
-      choices: ['嬉しかった', '面白かった', '悲しかった', '怒った', 'その他'],
+      choices: ['嬉しかった', '面白かった', '悲しかった', '怒った', 'その他(自由記述)'],
       key: 'event_how',
     ),
   ];
@@ -315,8 +315,8 @@ class _DiaryPageState extends State<DiaryPage> {
         break; // _askAiFollowUp() から直接呼ぶため何もしない
       case _Phase.addendum:
         _postAiMessage(
-          '最後に、この出来事について追記すべき事項はありますか？あれば教えてください。（後で自分で文章を入力することもできます）',
-          key: 'addendum',
+          '最後に、この出来事について追記すべき事項はありますか？',
+          choices: ['はい(追記事項の入力へ)', 'いいえ(日記の生成へ)'],
         );
       case _Phase.diaryView:
         break; // 日記生成後はUIで操作するため何もしない
@@ -343,8 +343,8 @@ class _DiaryPageState extends State<DiaryPage> {
     _textController.clear();
     setState(() => _currentChoices = null); // 選択肢を閉じる
 
-    // 「その他」「カスタム」選択時はフリーテキスト入力に切り替える（回答はまだ記録しない）
-    if ((text == 'その他' || text == 'カスタム') && _pendingKey != null) {
+    // 「その他(自由記述)」「カスタム」選択時はフリーテキスト入力に切り替える（回答はまだ記録しない）
+    if ((text == 'その他(自由記述)' || text == 'カスタム') && _pendingKey != null) {
       await _firestore.saveMessage(
           _uid!, _today!, 'user', text, _conversationOrder++);
       setState(() => _messages.add({'role': 'user', 'text': text}));
@@ -399,8 +399,18 @@ class _DiaryPageState extends State<DiaryPage> {
         _phase = _Phase.addendum;
         await _askNext();
       case _Phase.addendum:
-        _phase = _Phase.diaryView;
-        await _generateDiary();
+        if (text == 'はい(追記事項の入力へ)') {
+          // 自由記述の追記入力へ（回答をaddendum_textキーで記録）
+          _postAiMessage('追記事項を入力してください。', key: 'addendum');
+        } else if (text == 'いいえ(日記の生成へ)') {
+          // 追記なしで日記生成へ
+          _phase = _Phase.diaryView;
+          await _generateDiary();
+        } else {
+          // 'はい'選択後の自由記述入力 → answers['addendum']は保存済み
+          _phase = _Phase.diaryView;
+          await _generateDiary();
+        }
       case _Phase.diaryView:
         break; // diaryViewフェーズはボタンで操作するため入力は無視
       case _Phase.done:
@@ -515,6 +525,55 @@ class _DiaryPageState extends State<DiaryPage> {
     } finally {
       setState(() => _isLoading = false);
     }
+  }
+
+  // 選択肢が多い場合のドロップダウンUI
+  Widget _buildDropdown(List<String> choices) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A1A0E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: DetectiveTheme.gold.withValues(alpha: 0.5)),
+      ),
+      child: DropdownButton<String>(
+        value: null,
+        hint: const Text('選択してください',
+            style: TextStyle(color: Color(0xFFB0A090))),
+        isExpanded: true,
+        underline: const SizedBox.shrink(),
+        dropdownColor: const Color(0xFF2A1A0E),
+        style: const TextStyle(color: Color(0xFFE8DCC8)),
+        items: choices
+            .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+            .toList(),
+        onChanged: (val) {
+          if (val != null) _sendUserReply(val);
+        },
+      ),
+    );
+  }
+
+  // 選択肢が少ない場合のボタンUI
+  Widget _buildChoiceButtons(List<String> choices) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: choices.map((choice) {
+        return ElevatedButton(
+          onPressed: () => _sendUserReply(choice),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: DetectiveTheme.gold,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+          child: Text(choice),
+        );
+      }).toList(),
+    );
   }
 
   // エラーダイアログを表示する
@@ -635,27 +694,13 @@ class _DiaryPageState extends State<DiaryPage> {
                 }).toList(),
               ),
             ),
-          // 選択肢ボタン群
+          // 選択肢（5択以上はドロップダウン、4択以下はボタン）
           if (!_showExistingDiaryChoice && showChoices)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _currentChoices!.map((choice) {
-                  return ElevatedButton(
-                    onPressed: () => _sendUserReply(choice),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: DetectiveTheme.gold,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                    ),
-                    child: Text(choice),
-                  );
-                }).toList(),
-              ),
+              child: _currentChoices!.length > 2
+                  ? _buildDropdown(_currentChoices!)
+                  : _buildChoiceButtons(_currentChoices!),
             ),
           // 日記確認フェーズの4択ボタン
           if (_phase == _Phase.diaryView && _diaryGenerated && !_isLoading)
