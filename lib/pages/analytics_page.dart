@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../core/theme/detective_theme.dart';
+import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 
-// 証拠分析室：活動記録をグラフで表示するページ
+// 証拠分析室：活動記録をグラフ・表で表示するページ
 class AnalyticsPage extends StatefulWidget {
   const AnalyticsPage({super.key});
 
@@ -19,6 +20,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   bool _isLoading = true;
   // YYYY-MM-DD → 睡眠時間（記録なし日はnull）
   final Map<String, double?> _sleepData = {};
+  // YYYY-MM-DD → エントリ全データ
+  final Map<String, Map<String, dynamic>> _entriesData = {};
+  UserSettings? _settings;
 
   static const int _days = 14;
 
@@ -35,18 +39,27 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         setState(() => _isLoading = false);
         return;
       }
-      final entries = await _firestore.getRecentEntries(uid, _days);
 
-      final data = <String, double?>{};
+      // 並行フェッチ
+      final entriesFuture = _firestore.getRecentEntries(uid, _days);
+      final settingsFuture = _firestore.getUserSettings(uid);
+      final entries = await entriesFuture;
+      final settings = await settingsFuture;
+
+      final sleepData = <String, double?>{};
+      final entriesData = <String, Map<String, dynamic>>{};
       for (final entry in entries) {
+        entriesData[entry.key] = entry.value;
         final numeric =
             entry.value['numericAnswers'] as Map<String, dynamic>?;
         final sleep = numeric?['sleep'];
-        data[entry.key] = sleep != null ? (sleep as num).toDouble() : null;
+        sleepData[entry.key] = sleep != null ? (sleep as num).toDouble() : null;
       }
 
       setState(() {
-        _sleepData.addAll(data);
+        _sleepData.addAll(sleepData);
+        _entriesData.addAll(entriesData);
+        _settings = settings;
         _isLoading = false;
       });
     } catch (_) {
@@ -65,6 +78,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final dates = _dateRange;
     return Scaffold(
       backgroundColor: DetectiveTheme.background,
       appBar: AppBar(
@@ -92,7 +106,15 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                 children: [
                   _SectionHeader(title: '睡眠時間', subtitle: '直近$_days日間'),
                   const SizedBox(height: 16),
-                  _SleepChart(dates: _dateRange, sleepData: _sleepData),
+                  _SleepChart(dates: dates, sleepData: _sleepData),
+                  const SizedBox(height: 32),
+                  _SectionHeader(title: '活動記録', subtitle: '直近$_days日間'),
+                  const SizedBox(height: 16),
+                  _RecordsTable(
+                    dates: dates.reversed.toList(), // 新しい順
+                    entriesData: _entriesData,
+                    customQuestions: _settings?.customQuestions ?? [],
+                  ),
                 ],
               ),
             ),
@@ -171,7 +193,7 @@ class _SleepChart extends StatelessWidget {
             gridData: FlGridData(
               show: true,
               horizontalInterval: 2,
-              getDrawingHorizontalLine: (_) => FlLine(
+              getDrawingHorizontalLine: (value) => FlLine(
                 color: DetectiveTheme.cardBorder,
                 strokeWidth: 1,
               ),
@@ -184,7 +206,7 @@ class _SleepChart extends StatelessWidget {
                   showTitles: true,
                   interval: 2,
                   reservedSize: 32,
-                  getTitlesWidget: (value, _) => Text(
+                  getTitlesWidget: (value, meta) => Text(
                     '${value.toInt()}h',
                     style: const TextStyle(
                         fontSize: 10,
@@ -196,12 +218,11 @@ class _SleepChart extends StatelessWidget {
                 sideTitles: SideTitles(
                   showTitles: true,
                   reservedSize: 30,
-                  getTitlesWidget: (value, _) {
+                  getTitlesWidget: (value, meta) {
                     final i = value.toInt();
                     if (i < 0 || i >= dates.length) {
                       return const SizedBox.shrink();
                     }
-                    // 2日おきにラベルを表示して詰まりを防ぐ
                     if (i % 2 != 0) return const SizedBox.shrink();
                     final parts = dates[i].split('-');
                     return Transform.rotate(
@@ -239,6 +260,122 @@ class _SleepChart extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// 活動記録テーブル（食事・運動・勉強・カスタム質問）
+// ────────────────────────────────────────────────────────────
+class _RecordsTable extends StatelessWidget {
+  // dates は新しい順（降順）
+  final List<String> dates;
+  final Map<String, Map<String, dynamic>> entriesData;
+  final List<String> customQuestions;
+
+  const _RecordsTable({
+    required this.dates,
+    required this.entriesData,
+    required this.customQuestions,
+  });
+
+  static const _fixedHeaders = ['日付', '食事', '運動', '勉強'];
+  static const _fixedKeys = ['food', 'exercise', 'study'];
+
+  // カスタム質問ラベルを最大10文字に切り詰める
+  String _truncate(String s, int max) =>
+      s.length > max ? '${s.substring(0, max)}…' : s;
+
+  @override
+  Widget build(BuildContext context) {
+    final customHeaders = customQuestions
+        .asMap()
+        .entries
+        .map((e) => _truncate(e.value, 10))
+        .toList();
+    final allHeaders = [..._fixedHeaders, ...customHeaders];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: DetectiveTheme.cardBg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: DetectiveTheme.cardBorder),
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columnSpacing: 20,
+          headingRowHeight: 38,
+          dataRowMinHeight: 36,
+          dataRowMaxHeight: 52,
+          headingRowColor: WidgetStateProperty.all(
+              DetectiveTheme.gold.withValues(alpha: 0.12)),
+          headingTextStyle: const TextStyle(
+            color: DetectiveTheme.textPrimary,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+          dataTextStyle: const TextStyle(
+            color: DetectiveTheme.textSecondary,
+            fontSize: 12,
+          ),
+          dividerThickness: 0.5,
+          columns: allHeaders
+              .map((h) => DataColumn(label: Text(h)))
+              .toList(),
+          rows: dates.map((date) {
+            final answers = entriesData[date]?['answers']
+                as Map<String, dynamic>?;
+            final parts = date.split('-');
+            final dateLabel = '${parts[1]}/${parts[2]}';
+
+            final fixedCells = [
+              DataCell(Text(dateLabel,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: DetectiveTheme.textPrimary,
+                      fontSize: 12))),
+              ..._fixedKeys.map((key) {
+                final val = answers?[key] as String?;
+                return DataCell(_TableCell(value: val));
+              }),
+            ];
+
+            final customCells = customQuestions
+                .asMap()
+                .entries
+                .map((e) {
+              final val = answers?['custom_${e.key}'] as String?;
+              return DataCell(_TableCell(value: val));
+            }).toList();
+
+            return DataRow(cells: [...fixedCells, ...customCells]);
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+// テーブルのセル内テキスト（値なしのとき「—」を薄く表示）
+class _TableCell extends StatelessWidget {
+  final String? value;
+  const _TableCell({required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    if (value == null) {
+      return const Text('—',
+          style: TextStyle(
+              color: DetectiveTheme.cardBorder, fontSize: 12));
+    }
+    return Text(
+      value!,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+          color: DetectiveTheme.textSecondary, fontSize: 12),
     );
   }
 }
