@@ -516,6 +516,7 @@ class _DiaryPageState extends State<DiaryPage> {
         _firestore.saveDiary(_uid!, _today!, diary),
         _firestore.saveAnswers(_uid!, _today!, _answers),
       ]);
+      _postAiMessage('日記を生成しました。ご確認ください。');
       setState(() {
         _diary = diary;
         _diaryGenerated = true;
