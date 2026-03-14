@@ -74,15 +74,43 @@ class FirestoreService {
   }
 
   // 質問キー→回答テキストのマップをFirestoreに保存する（既存データとマージする）
+  // numericAnswers が渡された場合は数値データも同時に保存する
   Future<void> saveAnswers(
-      String uid, String date, Map<String, String> answers) async {
-    if (answers.isEmpty) return;
+      String uid, String date, Map<String, String> answers,
+      {Map<String, double>? numericAnswers}) async {
+    if (answers.isEmpty && (numericAnswers == null || numericAnswers.isEmpty)) {
+      return;
+    }
+    final data = <String, dynamic>{};
+    if (answers.isNotEmpty) data['answers'] = answers;
+    if (numericAnswers != null && numericAnswers.isNotEmpty) {
+      data['numericAnswers'] = numericAnswers;
+    }
     await _db
         .collection('users')
         .doc(uid)
         .collection('entries')
         .doc(date)
-        .set({'answers': answers}, SetOptions(merge: true));
+        .set(data, SetOptions(merge: true));
+  }
+
+  // 直近 days 日分のエントリを日付文字列とデータのペアで返す
+  Future<List<MapEntry<String, Map<String, dynamic>>>> getRecentEntries(
+      String uid, int days) async {
+    final now = DateTime.now();
+    final from = now.subtract(Duration(days: days - 1));
+    final fromStr = from.toIso8601String().split('T')[0];
+    final toStr = now.toIso8601String().split('T')[0];
+
+    final snap = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('entries')
+        .where(FieldPath.documentId, isGreaterThanOrEqualTo: fromStr)
+        .where(FieldPath.documentId, isLessThanOrEqualTo: toStr)
+        .get();
+
+    return snap.docs.map((doc) => MapEntry(doc.id, doc.data())).toList();
   }
 
   // 生成した日記テキストをFirestoreに保存する（既存データとマージする）
