@@ -1,4 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../core/theme/detective_theme.dart';
 import '../models/user_settings.dart';
 import '../services/auth_service.dart';
@@ -18,6 +21,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _uid;
   bool _isLoading = true;
   bool _isSaving = false; // 保存中フラグ（AppBarにスピナーを表示するために使用）
+  bool _isExporting = false;
 
   final AuthService _auth = AuthService();
   final FirestoreService _firestore = FirestoreService();
@@ -64,6 +68,61 @@ class _SettingsPageState extends State<SettingsPage> {
     _save(_settings.copyWith(
       customQuestions: [..._settings.customQuestions, text],
     ));
+  }
+
+  // 全エントリをCSV形式に変換してシェアシートを開く
+  Future<void> _exportCsv() async {
+    if (_uid == null) return;
+    setState(() => _isExporting = true);
+    try {
+      final entries = await _firestore.getAllEntries(_uid!);
+
+      // 全エントリに含まれるanswerキーを収集してCSVの列を決定する
+      final allAnswerKeys = <String>{};
+      for (final entry in entries) {
+        final answers = entry.value['answers'] as Map<String, dynamic>?;
+        if (answers != null) allAnswerKeys.addAll(answers.keys);
+      }
+      final answerKeys = allAnswerKeys.toList()..sort();
+
+      // ヘッダー行
+      final rows = <List<String>>[
+        ['日付', '日記', ...answerKeys],
+      ];
+
+      // データ行
+      for (final entry in entries) {
+        final date = entry.key;
+        final diary = (entry.value['diary'] as String?) ?? '';
+        final answers = (entry.value['answers'] as Map<String, dynamic>?) ?? {};
+        rows.add([
+          date,
+          diary,
+          ...answerKeys.map((k) => (answers[k] as String?) ?? ''),
+        ]);
+      }
+
+      // CSV文字列に変換（カンマ・改行・ダブルクォートを含む値はクォートで囲む）
+      final csv = rows.map((row) => row.map(_escapeCsv).join(',')).join('\n');
+
+      // 一時ファイルに書き込んでシェアする
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/nikkinext_export.csv');
+      await file.writeAsString('\uFEFF$csv', encoding: const SystemEncoding()); // BOM付きでExcelでも文字化けしない
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'text/csv')],
+        subject: 'NikkiNext 日記エクスポート',
+      );
+    } finally {
+      setState(() => _isExporting = false);
+    }
+  }
+
+  String _escapeCsv(String value) {
+    if (value.contains(',') || value.contains('"') || value.contains('\n')) {
+      return '"${value.replaceAll('"', '""')}"';
+    }
+    return value;
   }
 
   // 指定インデックスのカスタム質問を削除して保存する
@@ -254,6 +313,49 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                         ],
                       ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 28),
+
+                // ── セクション3: データ管理 ──────────────────────
+                const _SectionHeader(
+                  title: '◆ データ管理',
+                  subtitle: '日記データをCSVファイルでエクスポート',
+                ),
+                const SizedBox(height: 8),
+                _SettingsCard(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.download_outlined,
+                          color: DetectiveTheme.gold),
+                      title: const Text(
+                        'CSVでエクスポート',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: DetectiveTheme.textPrimary,
+                        ),
+                      ),
+                      subtitle: const Text(
+                        '全ての日記をCSVファイルとして書き出します',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: DetectiveTheme.textSecondary,
+                        ),
+                      ),
+                      trailing: _isExporting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: DetectiveTheme.gold,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Icon(Icons.chevron_right,
+                              color: DetectiveTheme.textSecondary),
+                      onTap: _isExporting ? null : _exportCsv,
                     ),
                   ],
                 ),

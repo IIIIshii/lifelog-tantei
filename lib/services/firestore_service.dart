@@ -126,6 +126,20 @@ class FirestoreService {
     }, SetOptions(merge: true));
   }
 
+  // 全エントリを日付の降順で返す（CSVエクスポート用）
+  Future<List<MapEntry<String, Map<String, dynamic>>>> getAllEntries(
+      String uid) async {
+    final snap = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('entries')
+        .get();
+    final entries =
+        snap.docs.map((doc) => MapEntry(doc.id, doc.data())).toList();
+    entries.sort((a, b) => b.key.compareTo(a.key));
+    return entries;
+  }
+
   // 日記エントリ一覧を取得するクエリを返す
   // ソートはクライアント側でドキュメントID（YYYY-MM-DD）の降順で行う
   Query<Map<String, dynamic>> entriesQuery(String uid) {
