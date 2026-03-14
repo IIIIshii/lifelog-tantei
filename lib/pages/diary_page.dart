@@ -45,8 +45,10 @@ class _DiaryPageState extends State<DiaryPage> {
   int _conversationOrder = 0; // Firestoreに保存するメッセージの順序カウンター
   final List<Map<String, String>> _messages = []; // 画面に表示する会話履歴
   String? _diary; // 生成された日記テキスト
+  String? _existingDiary; // 既存の日記テキスト（追記時に使用）
   bool _isLoading = false;
   bool _diaryGenerated = false;
+  bool _showExistingDiaryChoice = false; // 追記 or 確認の選択肢を表示するフラグ
   final TextEditingController _textController = TextEditingController();
   List<String>? _currentChoices; // 現在表示中の選択肢。nullのときはテキスト入力を表示
   String? _pendingKey; // 直前のAI質問のキー（次のユーザー回答をanswersに紐づけるため）
@@ -105,12 +107,39 @@ class _DiaryPageState extends State<DiaryPage> {
       final existingDiary = await _firestore.getTodayDiary(_uid!, _today!);
       if (existingDiary != null) {
         setState(() {
-          _diary = existingDiary;
-          _diaryGenerated = true;
+          _existingDiary = existingDiary;
+          _messages.add({'role': 'ai', 'text': '今日の事件簿がすでにあります。どうしますか？'});
+          _showExistingDiaryChoice = true;
         });
         return;
       }
 
+      final settings = await _firestore.getUserSettings(_uid!);
+      _buildQueues(settings);
+      await _askNext();
+    } catch (e) {
+      _showError('初期化エラー: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // 既存の日記がある場合の選択肢（追記 or 確認）を処理する
+  Future<void> _handleExistingDiaryChoice(String choice) async {
+    setState(() => _showExistingDiaryChoice = false);
+    _messages.add({'role': 'user', 'text': choice});
+
+    if (choice == '日記を確認する') {
+      setState(() {
+        _diary = _existingDiary;
+        _diaryGenerated = true;
+      });
+      return;
+    }
+
+    // 追記する → 通常の質問フローを開始
+    setState(() => _isLoading = true);
+    try {
       final settings = await _firestore.getUserSettings(_uid!);
       _buildQueues(settings);
       await _askNext();
@@ -284,7 +313,9 @@ class _DiaryPageState extends State<DiaryPage> {
       _isLoading = true;
     });
     try {
-      final diary = await _gemini.generateDiary(_messages);
+      final diary = _existingDiary != null
+          ? await _gemini.generateDiaryWithExisting(_existingDiary!, _messages)
+          : await _gemini.generateDiary(_messages);
       await Future.wait([
         _firestore.saveDiary(_uid!, _today!, diary),
         _firestore.saveAnswers(_uid!, _today!, _answers),
@@ -393,8 +424,34 @@ class _DiaryPageState extends State<DiaryPage> {
               // ゴールドのローディングインジケーターでテーマに統一する
               child: CircularProgressIndicator(color: DetectiveTheme.gold),
             ),
+          // 追記 or 確認の選択肢ボタン
+          if (_showExistingDiaryChoice && !_isLoading)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: ['追記する', '日記を確認する'].map((choice) {
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ElevatedButton(
+                        onPressed: () => _handleExistingDiaryChoice(choice),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF5C3D2E),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        child: Text(choice),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
           // 選択肢ボタン群
-          if (showChoices)
+          if (!_showExistingDiaryChoice && showChoices)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Wrap(
@@ -439,7 +496,7 @@ class _DiaryPageState extends State<DiaryPage> {
                 ),
               ),
             ),
-          if (showInput)
+          if (!_showExistingDiaryChoice && showInput)
             InputArea(controller: _textController, onSubmit: _sendUserReply),
         ],
       ),

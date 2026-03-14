@@ -35,6 +35,16 @@ class GeminiService {
     return response.text ?? '日記を生成できませんでした。';
   }
 
+  // 既存の日記と追記インタビューの会話を統合して日記テキストをGeminiに生成させる
+  Future<String> generateDiaryWithExisting(
+      String existingDiary, List<Map<String, String>> messages) async {
+    final history = _buildHistory(messages);
+    final response = await _model.generateContent([
+      Content.text(DiaryPrompts.generateDiaryWithExisting(existingDiary, history)),
+    ]);
+    return response.text ?? '日記を生成できませんでした。';
+  }
+
   // メッセージリストを「AI: ...」「ユーザー: ...」形式の文字列に変換する
   String _buildHistory(List<Map<String, String>> messages) {
     return messages

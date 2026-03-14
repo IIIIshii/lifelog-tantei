@@ -24,4 +24,13 @@ class DiaryPrompts {
     return '以下の会話を元に、ユーザーの視点で100〜300字の自然な日記を生成してください。\n\n'
         '$conversationHistory';
   }
+
+  /// 既存の日記と追記インタビューの会話を統合して日記を生成するプロンプト
+  static String generateDiaryWithExisting(
+      String existingDiary, String conversationHistory) {
+    return '以下は今日すでに書かれた日記です:\n$existingDiary\n\n'
+        'そして以下は、追加で行ったインタビューの会話です:\n$conversationHistory\n\n'
+        'これらの内容を統合して、ユーザーの視点で100〜300字の自然な日記を1つ生成してください。'
+        '既存の日記の内容も含め、追記分の内容も自然に反映させてください。';
+  }
 }
