@@ -49,10 +49,10 @@ class DiaryListPage extends StatelessWidget {
           if (snapshot.hasError) {
             return Center(child: Text('エラー: ${snapshot.error}'));
           }
-
-          final docs = snapshot.data?.docs ?? [];
-
-          // 日記がない場合: 探偵風の空状態メッセージを表示する
+          // diary フィールドがないドキュメント（会話途中で終わったもの等）を除外する
+          final docs = (snapshot.data?.docs ?? [])
+              .where((d) => (d.data() as Map<String, dynamic>)['diary'] != null)
+              .toList();
           if (docs.isEmpty) {
             return const Center(
               child: Column(

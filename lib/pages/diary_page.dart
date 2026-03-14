@@ -21,6 +21,13 @@ import 'diary_list_page.dart';
 // done         : 全質問完了・日記生成待ち
 enum _Phase { fixed, eventQuestions, ai, addendum, custom, confirm, done }
 
+// 1つの質問を表すデータクラス。choicesがnullの場合はテキスト入力式
+class _Question {
+  final String text;
+  final List<String>? choices;
+  const _Question(this.text, {this.choices});
+}
+
 // 今日の日記を作成するページ。AIとの対話を通じて日記を生成する
 class DiaryPage extends StatefulWidget {
   const DiaryPage({super.key});
@@ -38,15 +45,16 @@ class _DiaryPageState extends State<DiaryPage> {
   bool _isLoading = false;
   bool _diaryGenerated = false;
   final TextEditingController _textController = TextEditingController();
+  List<String>? _currentChoices; // 現在表示中の選択肢。nullのときはテキスト入力を表示
 
   late final GeminiService _gemini;
   final AuthService _auth = AuthService();
   final FirestoreService _firestore = FirestoreService();
 
   _Phase _phase = _Phase.fixed;
-  final Queue<String> _fixedQueue = Queue(); // 設定から生成した固定質問のキュー
-  final Queue<String> _eventQueue = Queue(); // 出来事の構造化質問のキュー
-  final Queue<String> _customQueue = Queue(); // ユーザー定義のカスタム質問のキュー
+  final Queue<_Question> _fixedQueue = Queue(); // 設定から生成した固定質問のキュー
+  final Queue<_Question> _eventQueue = Queue(); // 出来事の構造化質問のキュー
+  final Queue<_Question> _customQueue = Queue(); // ユーザー定義のカスタム質問のキュー
 
   // 出来事についての構造化された固定質問リスト
   static const List<String> _eventQuestions = [
@@ -103,30 +111,38 @@ class _DiaryPageState extends State<DiaryPage> {
     if (settings.recallAssist) {
       // 思い出しアシストONの場合、時間帯別の質問を3問追加する
       _fixedQueue.addAll([
-        '午前中は何をしていましたか？',
-        '午後は何をしていましたか？',
-        '夜は何をしていましたか？',
+        const _Question('午前中は何をしていましたか？'),
+        const _Question('午後は何をしていましたか？'),
+        const _Question('夜は何をしていましたか？'),
       ]);
     }
     if (settings.recordSleep) {
-      _fixedQueue.add('昨夜は何時間くらい眠れましたか？');
+      // 睡眠時間は数字選択式
+      _fixedQueue.add(const _Question(
+        '昨夜は何時間くらい眠れましたか？',
+        choices: ['4時間以下', '5時間', '6時間', '7時間', '8時間', '9時間以上'],
+      ));
     }
     if (settings.recordFood) {
-      _fixedQueue.add('今日食べたものを教えてください。');
+      _fixedQueue.add(const _Question('今日食べたものを教えてください。'));
     }
     if (settings.recordExercise) {
-      _fixedQueue.add('今日運動しましたか？');
+      // 筋トレの有無はYes/No選択式
+      _fixedQueue.add(const _Question(
+        '今日、筋トレをしましたか？',
+        choices: ['はい', 'いいえ'],
+      ));
     }
     if (settings.recordStudy) {
-      _fixedQueue.add('今日の勉強内容を教えてください。');
+      _fixedQueue.add(const _Question('今日の勉強内容を教えてください。'));
     }
 
     // 出来事の構造化質問を冒頭に「記録したい出来事についてお聞きします」を付けてキューへ
-    _eventQueue.add('記録したい出来事についてお聞きします。');
-    _eventQueue.addAll(_eventQuestions);
+    _eventQueue.add(const _Question('記録したい出来事についてお聞きします。'));
+    _eventQueue.addAll(_eventQuestions.map((q) => _Question(q)));
 
     for (final q in settings.customQuestions) {
-      _customQueue.add(q);
+      _customQueue.add(_Question(q));
     }
   }
 
@@ -135,14 +151,16 @@ class _DiaryPageState extends State<DiaryPage> {
     switch (_phase) {
       case _Phase.fixed:
         if (_fixedQueue.isNotEmpty) {
-          _postAiMessage(_fixedQueue.removeFirst());
+          final q = _fixedQueue.removeFirst();
+          _postAiMessage(q.text, choices: q.choices);
         } else {
           _phase = _Phase.eventQuestions;
           await _askNext();
         }
       case _Phase.eventQuestions:
         if (_eventQueue.isNotEmpty) {
-          _postAiMessage(_eventQueue.removeFirst());
+          final q = _eventQueue.removeFirst();
+          _postAiMessage(q.text, choices: q.choices);
         } else {
           // 構造化質問が終わったらAIの追加質問フェーズへ
           _phase = _Phase.ai;
@@ -152,7 +170,8 @@ class _DiaryPageState extends State<DiaryPage> {
         _postAiMessage('追記したいことはありますか？（なければ「なし」と入力してください）');
       case _Phase.custom:
         if (_customQueue.isNotEmpty) {
-          _postAiMessage(_customQueue.removeFirst());
+          final q = _customQueue.removeFirst();
+          _postAiMessage(q.text, choices: q.choices);
         } else {
           _phase = _Phase.confirm;
           await _askNext();
@@ -169,15 +188,20 @@ class _DiaryPageState extends State<DiaryPage> {
   }
 
   // Geminiを呼ばずにメッセージをAI発言としてリストとFirestoreに追加する
-  void _postAiMessage(String text) {
+  // choicesが指定された場合は選択肢ボタンを表示する
+  void _postAiMessage(String text, {List<String>? choices}) {
     _firestore.saveMessage(_uid!, _today!, 'ai', text, _conversationOrder++);
-    setState(() => _messages.add({'role': 'ai', 'text': text}));
+    setState(() {
+      _messages.add({'role': 'ai', 'text': text});
+      _currentChoices = choices;
+    });
   }
 
   // ユーザーの返答を受け取り、現在のフェーズに応じて次のアクションを決める
   Future<void> _sendUserReply(String text) async {
     if (text.trim().isEmpty) return;
     _textController.clear();
+    setState(() => _currentChoices = null); // 選択肢を閉じる
 
     await _firestore.saveMessage(
         _uid!, _today!, 'user', text, _conversationOrder++);
@@ -262,10 +286,17 @@ class _DiaryPageState extends State<DiaryPage> {
   @override
   Widget build(BuildContext context) {
     final lastIsAI = _messages.isNotEmpty && _messages.last['role'] == 'ai';
-    // confirmフェーズはボタンUIを出すためテキスト入力を非表示にする
+    final showChoices = !_diaryGenerated &&
+        !_isLoading &&
+        lastIsAI &&
+        _currentChoices != null &&
+        _phase != _Phase.confirm &&
+        _phase != _Phase.done;
+    // confirmフェーズ・選択肢表示中はテキスト入力を非表示にする
     final showInput = !_diaryGenerated &&
         !_isLoading &&
         lastIsAI &&
+        _currentChoices == null &&
         _phase != _Phase.confirm &&
         _phase != _Phase.done;
     final showConfirmButton = _phase == _Phase.confirm && !_isLoading;
@@ -328,7 +359,29 @@ class _DiaryPageState extends State<DiaryPage> {
               // ゴールドのローディングインジケーターでテーマに統一する
               child: CircularProgressIndicator(color: DetectiveTheme.gold),
             ),
-          // 「事件簿を作成しますか？」確認ボタン
+          // 選択肢ボタン群
+          if (showChoices)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _currentChoices!.map((choice) {
+                  return ElevatedButton(
+                    onPressed: () => _sendUserReply(choice),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5C3D2E),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                    child: Text(choice),
+                  );
+                }).toList(),
+              ),
+            ),
+          // 「これでいいですか？」確認ボタン
           if (showConfirmButton)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

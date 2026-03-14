@@ -73,14 +73,13 @@ class FirestoreService {
     }, SetOptions(merge: true));
   }
 
-  // 日記が存在するエントリを新しい順で取得するクエリを返す
+  // 日記エントリを新しい順（日付降順）で取得するクエリを返す
+  // ドキュメントIDがYYYY-MM-DD形式のため、FieldPath.documentId()で辞書順=日付順に並ぶ
   Query<Map<String, dynamic>> entriesQuery(String uid) {
     return _db
         .collection('users')
         .doc(uid)
         .collection('entries')
-        .where('diary', isNotEqualTo: null)
-        .orderBy('diary')
-        .orderBy('timestamp', descending: true);
+        .orderBy(FieldPath.documentId, descending: true);
   }
 }
