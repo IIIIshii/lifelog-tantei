@@ -451,7 +451,7 @@ class _DiaryPageState extends State<DiaryPage> {
               ),
             ),
           // 選択肢ボタン群
-          if (showChoices)
+          if (!_showExistingDiaryChoice && showChoices)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Wrap(
@@ -496,7 +496,7 @@ class _DiaryPageState extends State<DiaryPage> {
                 ),
               ),
             ),
-          if (showInput)
+          if (!_showExistingDiaryChoice && showInput)
             InputArea(controller: _textController, onSubmit: _sendUserReply),
         ],
       ),
