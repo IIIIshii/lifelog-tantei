@@ -87,26 +87,26 @@ class _DiaryPageState extends State<DiaryPage> {
   // メインの出来事質問リスト（_eventQuestionKeysと順序を合わせること）
   static const List<_Question> _eventQuestions = [
     _Question(
-      'まず、それはいつの出来事ですか？',
+      'それはいつの話だ？',
       choices: ['朝', '昼', '夜', '仕事中', '学校', 'プライベート', 'その他(自由記述)'],
       key: 'event_when',
     ),
     _Question(
-      '次に、それはどこでの出来事ですか？',
+      'どこで起きた？',
       choices: ['自宅', '学校', '職場', 'その他(自由記述)'],
       key: 'event_where',
     ),
     _Question(
-      '誰についての出来事ですか？',
+      '誰に関わる話だ？',
       choices: ['自分', 'その他(自由記述)'],
       key: 'event_who',
     ),
     _Question(
-      '何が行われましたか？',
+      '何があった？話してくれ。',
       key: 'event_what',
     ),
     _Question(
-      'それを受けて、あなたはどう感じましたか？',
+      'そのとき、どう感じた？',
       choices: ['嬉しかった', '面白かった', '悲しかった', '怒った', 'その他(自由記述)'],
       key: 'event_how',
     ),
@@ -136,7 +136,7 @@ class _DiaryPageState extends State<DiaryPage> {
       final existingDiary = await _firestore.getTodayDiary(_uid!, _today!);
       if (existingDiary != null) {
         _conversationOrder = await _firestore.getMessageCount(_uid!, _today!);
-        const message = '今日の事件簿がすでにあります。どうしますか？';
+        const message = '今日の事件簿はすでに存在する。どうするつもりだ？';
         await _firestore.saveMessage(
             _uid!, _today!, 'ai', message, _conversationOrder++);
         setState(() {
@@ -194,7 +194,7 @@ class _DiaryPageState extends State<DiaryPage> {
     // ── カスタム質問キュー（sleep/food/exercise/study + ユーザー定義）──
     if (settings.recordSleep) {
       _customQueue.add(const _Question(
-        '今日の睡眠時間は何時間でしたか？',
+        '昨夜は何時間眠った？',
         choices: [
           '〜4時間', '4.5時間', '5時間', '5.5時間', '6時間', '6.5時間',
           '7時間', '7.5時間', '8時間', '8.5時間', '9時間', '9.5時間',
@@ -205,18 +205,18 @@ class _DiaryPageState extends State<DiaryPage> {
       ));
     }
     if (settings.recordFood) {
-      _customQueue.add(const _Question('今日は何を食べましたか？', key: 'food'));
+      _customQueue.add(const _Question('今日、何を口にした？', key: 'food'));
     }
     if (settings.recordExercise) {
       _customQueue.add(const _Question(
-        '今日は運動をしましたか？',
+        '身体を動かしたか？',
         choices: ['した', 'していない'],
         key: 'exercise',
       ));
     }
     if (settings.recordStudy) {
       _customQueue.add(const _Question(
-        '今日は勉強をしましたか？',
+        '今日、頭を使う作業はしたか？',
         choices: ['した', 'していない'],
         key: 'study',
       ));
@@ -229,9 +229,9 @@ class _DiaryPageState extends State<DiaryPage> {
     _hasRecallAssist = settings.recallAssist;
     if (settings.recallAssist) {
       _recallQueue.addAll([
-        const _Question('今日、午前中は何をされましたか？', key: 'morning'),
-        const _Question('次に、午後は何をされましたか？', key: 'afternoon'),
-        const _Question('最後に、夜は何をされましたか？', key: 'evening'),
+        const _Question('午前中の動向を報告してくれ。', key: 'morning'),
+        const _Question('午後はどう動いた？', key: 'afternoon'),
+        const _Question('夜の動向は？', key: 'evening'),
       ]);
     }
 
@@ -254,7 +254,7 @@ class _DiaryPageState extends State<DiaryPage> {
         if (!_customIntroPosted) {
           _customIntroPosted = true;
           _postAiMessage(
-            'はじめに、ご自身で設定された記録事項について質問していきます。',
+            'まず、いくつか確認させてもらう。',
             choices: ['次へ'],
           );
           return;
@@ -272,7 +272,7 @@ class _DiaryPageState extends State<DiaryPage> {
             k.startsWith('custom_'));
         if (hasCustomAnswers) {
           _postAiMessage(
-            '回答を記録しました。記録は事件簿アーカイブから確認できます。\nこれからお聞きする出来事と合わせて、これらも日記の記述に追加しますか？',
+            '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？',
             choices: ['はい', 'いいえ'],
           );
         } else {
@@ -287,7 +287,7 @@ class _DiaryPageState extends State<DiaryPage> {
         }
         if (!_recallIntroPosted) {
           _recallIntroPosted = true;
-          _postAiMessage('では、今日一日を思い出しましょう。', choices: ['次へ']);
+          _postAiMessage('今日一日の行動を洗いざらい話してもらおう。', choices: ['次へ']);
           return;
         }
         if (_recallQueue.isNotEmpty) {
@@ -299,12 +299,12 @@ class _DiaryPageState extends State<DiaryPage> {
         }
       case _Phase.recallSaved:
         _postAiMessage(
-          '回答を記録しました。記録は事件簿アーカイブから確認できます。\nこれからお聞きする出来事と合わせて、これらも日記の記述に追加しますか？',
+          '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？',
           choices: ['はい', 'いいえ'],
         );
       case _Phase.modeSelect:
         _postAiMessage(
-          'これから、今日の日記を作成します。質問に沿って作成しますか？それとも、ご自分で文章を入力されますか？',
+          '今日の事件簿を作成する。どうする？',
           choices: ['質問に沿って作成', '自分で入力'],
         );
       case _Phase.event:
@@ -319,7 +319,7 @@ class _DiaryPageState extends State<DiaryPage> {
         break; // _askAiFollowUp() から直接呼ぶため何もしない
       case _Phase.addendum:
         _postAiMessage(
-          '最後に、この出来事について追記すべき事項はありますか？',
+          '他に言い残したことはあるか？',
           choices: ['はい(追記事項の入力へ)', 'いいえ(日記の生成へ)'],
         );
       case _Phase.diaryView:
@@ -388,7 +388,7 @@ class _DiaryPageState extends State<DiaryPage> {
           _phase = _Phase.event;
           _eventMsgStart = _messages.length;
           _postAiMessage(
-            'これから、日記にメインで記入する、今日を特徴づけるような出来事についてお聞きします。記入したい出来事を思い浮かべてください。',
+            '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
             choices: ['次へ'],
           );
         } else {
@@ -414,7 +414,7 @@ class _DiaryPageState extends State<DiaryPage> {
       case _Phase.addendum:
         if (text == 'はい(追記事項の入力へ)') {
           // 自由記述の追記入力へ（回答をaddendum_textキーで記録）
-          _postAiMessage('追記事項を入力してください。', key: 'addendum');
+          _postAiMessage('言い残したことを話してくれ。', key: 'addendum');
         } else if (text == 'いいえ(日記の生成へ)') {
           // 追記なしで日記生成へ
           _phase = _Phase.diaryView;
@@ -463,7 +463,7 @@ class _DiaryPageState extends State<DiaryPage> {
         // 日記はすでに_generateDiary()で保存済み。完了メッセージを投稿してdoneへ
         setState(() => _phase = _Phase.done);
         _postAiMessage(
-            'お疲れ様でした。記録した日記は事件簿アーカイブから確認できます。');
+            '以上だ。事件簿はアーカイブに保管した。');
       case '編集する':
         if (mounted) {
           Navigator.push(
@@ -499,7 +499,7 @@ class _DiaryPageState extends State<DiaryPage> {
           _eventQueue.add(q);
         }
         _postAiMessage(
-          'これから、日記にメインで記入する、今日を特徴づけるような出来事についてお聞きします。記入したい出来事を思い浮かべてください。',
+          '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
           choices: ['次へ'],
         );
     }
@@ -545,7 +545,7 @@ class _DiaryPageState extends State<DiaryPage> {
         _firestore.saveAnswers(_uid!, _today!, _answers,
             numericAnswers: _numericAnswers),
       ]);
-      _postAiMessage('日記を生成しました。ご確認ください。');
+      _postAiMessage('事件簿を作成した。確認してくれ。');
       setState(() {
         _diary = diary;
         _diaryGenerated = true;
