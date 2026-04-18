@@ -44,6 +44,7 @@ dependencies:
   google_fonts: ^8.0.2 # 探偵テーマのフォント（Playfair Display等）に使用
   share_plus: ^10.0.0
   path_provider: ^2.1.5
+  shared_preferences: ^2.3.2 # テーマ設定を端末ローカルに永続化するため使用
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

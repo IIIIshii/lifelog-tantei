@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../core/theme/detective_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/detective_text_styles.dart';
 import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
@@ -79,26 +80,28 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   @override
   Widget build(BuildContext context) {
     final dates = _dateRange;
+    final c = context.colors;
     return Scaffold(
-      backgroundColor: DetectiveTheme.background,
+      backgroundColor: c.background,
       appBar: AppBar(
-        backgroundColor: DetectiveTheme.appBarBg,
-        foregroundColor: const Color(0xFFE8DCC8),
+        backgroundColor: c.appBarBg,
+        foregroundColor: c.appBarFg,
         elevation: 0,
         toolbarHeight: 64,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('証拠分析室', style: DetectiveTheme.appBarTitle),
+            Text('証拠分析室',
+                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
             const SizedBox(height: 2),
-            const Text('― データを読む ―',
-                style: DetectiveTheme.appBarSubtitle),
+            Text('― データを読む ―',
+                style: DetectiveTextStyles.appBarSubtitle(
+                    color: c.appBarSubtitle)),
           ],
         ),
       ),
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: DetectiveTheme.gold))
+          ? Center(child: CircularProgressIndicator(color: c.gold))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -132,15 +135,16 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Text(title,
-            style: DetectiveTheme.cardTitle.copyWith(fontSize: 18)),
+            style: DetectiveTextStyles.cardTitle(color: c.textPrimary)
+                .copyWith(fontSize: 18)),
         const SizedBox(width: 8),
         Text(subtitle,
-            style: const TextStyle(
-                fontSize: 12, color: DetectiveTheme.textSecondary)),
+            style: TextStyle(fontSize: 12, color: c.textSecondary)),
       ],
     );
   }
@@ -157,6 +161,7 @@ class _SleepChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     final barGroups = <BarChartGroupData>[];
     for (var i = 0; i < dates.length; i++) {
       final hours = sleepData[dates[i]];
@@ -166,8 +171,8 @@ class _SleepChart extends StatelessWidget {
           BarChartRodData(
             toY: hours ?? 0,
             color: hours != null
-                ? DetectiveTheme.gold
-                : DetectiveTheme.goldLight.withValues(alpha: 0.2),
+                ? c.gold
+                : c.goldLight.withValues(alpha: 0.2),
             width: 14,
             borderRadius:
                 const BorderRadius.vertical(top: Radius.circular(4)),
@@ -179,9 +184,9 @@ class _SleepChart extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(4, 20, 16, 12),
       decoration: BoxDecoration(
-        color: DetectiveTheme.cardBg,
+        color: c.cardBg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: DetectiveTheme.cardBorder),
+        border: Border.all(color: c.cardBorder),
       ),
       child: SizedBox(
         height: 220,
@@ -194,7 +199,7 @@ class _SleepChart extends StatelessWidget {
               show: true,
               horizontalInterval: 2,
               getDrawingHorizontalLine: (value) => FlLine(
-                color: DetectiveTheme.cardBorder,
+                color: c.cardBorder,
                 strokeWidth: 1,
               ),
               drawVerticalLine: false,
@@ -208,9 +213,7 @@ class _SleepChart extends StatelessWidget {
                   reservedSize: 32,
                   getTitlesWidget: (value, meta) => Text(
                     '${value.toInt()}h',
-                    style: const TextStyle(
-                        fontSize: 10,
-                        color: DetectiveTheme.textSecondary),
+                    style: TextStyle(fontSize: 10, color: c.textSecondary),
                   ),
                 ),
               ),
@@ -229,9 +232,8 @@ class _SleepChart extends StatelessWidget {
                       angle: -0.4,
                       child: Text(
                         '${parts[1]}/${parts[2]}',
-                        style: const TextStyle(
-                            fontSize: 9,
-                            color: DetectiveTheme.textSecondary),
+                        style:
+                            TextStyle(fontSize: 9, color: c.textSecondary),
                       ),
                     );
                   },
@@ -244,15 +246,14 @@ class _SleepChart extends StatelessWidget {
             ),
             barTouchData: BarTouchData(
               touchTooltipData: BarTouchTooltipData(
-                getTooltipColor: (spot) => DetectiveTheme.appBarBg,
+                getTooltipColor: (spot) => c.appBarBg,
                 getTooltipItem: (group, groupIndex, rod, rodIndex) {
                   if (rod.toY == 0) return null;
                   final parts = dates[group.x].split('-');
                   final label = '${parts[1]}/${parts[2]}';
                   return BarTooltipItem(
                     '$label\n${rod.toY}h',
-                    const TextStyle(
-                        color: Color(0xFFE8DCC8), fontSize: 12),
+                    TextStyle(color: c.appBarFg, fontSize: 12),
                   );
                 },
               ),
@@ -288,6 +289,7 @@ class _RecordsTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     final customHeaders = customQuestions
         .asMap()
         .entries
@@ -297,9 +299,9 @@ class _RecordsTable extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: DetectiveTheme.cardBg,
+        color: c.cardBg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: DetectiveTheme.cardBorder),
+        border: Border.all(color: c.cardBorder),
       ),
       clipBehavior: Clip.hardEdge,
       child: SingleChildScrollView(
@@ -309,15 +311,15 @@ class _RecordsTable extends StatelessWidget {
           headingRowHeight: 38,
           dataRowMinHeight: 36,
           dataRowMaxHeight: 52,
-          headingRowColor: WidgetStateProperty.all(
-              DetectiveTheme.gold.withValues(alpha: 0.12)),
-          headingTextStyle: const TextStyle(
-            color: DetectiveTheme.textPrimary,
+          headingRowColor:
+              WidgetStateProperty.all(c.gold.withValues(alpha: 0.12)),
+          headingTextStyle: TextStyle(
+            color: c.textPrimary,
             fontWeight: FontWeight.bold,
             fontSize: 12,
           ),
-          dataTextStyle: const TextStyle(
-            color: DetectiveTheme.textSecondary,
+          dataTextStyle: TextStyle(
+            color: c.textSecondary,
             fontSize: 12,
           ),
           dividerThickness: 0.5,
@@ -332,9 +334,9 @@ class _RecordsTable extends StatelessWidget {
 
             final fixedCells = [
               DataCell(Text(dateLabel,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: DetectiveTheme.textPrimary,
+                      color: c.textPrimary,
                       fontSize: 12))),
               ..._fixedKeys.map((key) {
                 final val = answers?[key] as String?;
@@ -365,17 +367,16 @@ class _TableCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     if (value == null) {
-      return const Text('—',
-          style: TextStyle(
-              color: DetectiveTheme.cardBorder, fontSize: 12));
+      return Text('—',
+          style: TextStyle(color: c.cardBorder, fontSize: 12));
     }
     return Text(
       value!,
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style: const TextStyle(
-          color: DetectiveTheme.textSecondary, fontSize: 12),
+      style: TextStyle(color: c.textSecondary, fontSize: 12),
     );
   }
 }

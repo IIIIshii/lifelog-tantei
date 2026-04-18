@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../core/theme/detective_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/detective_text_styles.dart';
 import '../services/firestore_service.dart';
 import 'diary_edit_page.dart';
 
@@ -27,23 +28,26 @@ class DiaryDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     return Scaffold(
-      backgroundColor: DetectiveTheme.background,
+      backgroundColor: c.background,
 
       // ── AppBar ──────────────────────────────────────────────
       // 日付を整形して表示し、サブタイトルで「事件報告書」であることを示す
       appBar: AppBar(
-        backgroundColor: DetectiveTheme.appBarBg,
-        foregroundColor: const Color(0xFFE8DCC8),
+        backgroundColor: c.appBarBg,
+        foregroundColor: c.appBarFg,
         elevation: 0,
         toolbarHeight: 64,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_formatDate(date), style: DetectiveTheme.appBarTitle),
+            Text(_formatDate(date),
+                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
             const SizedBox(height: 2),
-            const Text('― 事件報告書 ―',
-                style: DetectiveTheme.appBarSubtitle),
+            Text('― 事件報告書 ―',
+                style: DetectiveTextStyles.appBarSubtitle(
+                    color: c.appBarSubtitle)),
           ],
         ),
       ),
@@ -55,10 +59,10 @@ class DiaryDetailPage extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         child: Container(
           decoration: BoxDecoration(
-            color: DetectiveTheme.cardBg,
+            color: c.cardBg,
             borderRadius: BorderRadius.circular(4),
             // ゴールドの枠線でDiaryCardと同じ「重要書類」感を表現する
-            border: Border.all(color: DetectiveTheme.gold, width: 1.5),
+            border: Border.all(color: c.gold, width: 1.5),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -67,21 +71,19 @@ class DiaryDetailPage extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 16, vertical: 10),
-                decoration: const BoxDecoration(
-                  border: Border(
-                      bottom: BorderSide(color: DetectiveTheme.gold)),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: c.gold)),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.description,
-                        color: DetectiveTheme.gold, size: 16),
+                    Icon(Icons.description, color: c.gold, size: 16),
                     const SizedBox(width: 6),
-                    const Text(
+                    Text(
                       '事件報告書',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: DetectiveTheme.gold,
+                        color: c.gold,
                         letterSpacing: 1.0,
                       ),
                     ),
@@ -91,15 +93,15 @@ class DiaryDetailPage extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        border: Border.all(color: DetectiveTheme.gold),
+                        border: Border.all(color: c.gold),
                         borderRadius: BorderRadius.circular(2),
                       ),
-                      child: const Text(
+                      child: Text(
                         'CLOSED',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: DetectiveTheme.gold,
+                          color: c.gold,
                           letterSpacing: 1.5,
                         ),
                       ),
@@ -113,9 +115,9 @@ class DiaryDetailPage extends StatelessWidget {
                 padding: const EdgeInsets.all(20),
                 child: Text(
                   diary,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
-                    color: DetectiveTheme.textPrimary,
+                    color: c.textPrimary,
                     height: 1.8, // 行間を広めにとって読みやすくする
                   ),
                 ),
@@ -140,8 +142,8 @@ class DiaryDetailPage extends StatelessWidget {
                   ),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: DetectiveTheme.gold,
-                  foregroundColor: Colors.white,
+                  backgroundColor: c.gold,
+                  foregroundColor: c.appBarFg,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(4)),

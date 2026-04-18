@@ -103,7 +103,10 @@ lib/
 ├── firebase_options.dart       # Firebase設定
 ├── core/
 │   └── theme/
-│       └── detective_theme.dart  # 探偵テーマ（色・フォント定義）
+│       ├── app_colors.dart           # テーマごとの色トークン（ThemeExtension）
+│       ├── app_theme.dart            # テーマ定義（ライト/ダーク/書斎）とThemeDataビルダー
+│       ├── detective_text_styles.dart # フォント定義（色はテーマ側から注入）
+│       └── theme_controller.dart     # テーマ選択状態の管理とSharedPreferences永続化
 ├── models/
 │   └── user_settings.dart      # 設定データモデル
 ├── pages/
