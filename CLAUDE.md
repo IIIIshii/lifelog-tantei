@@ -39,9 +39,10 @@ flutter test test/widget_test.dart
 Currently a single-file Flutter app (`lib/main.dart`) with all logic in one place. The app is intended to grow into a multi-screen diary app.
 
 **Initialization order in `main()`:**
-1. `dotenv.load()` — must come first, before anything else
-2. `WidgetsFlutterBinding.ensureInitialized()`
-3. `Firebase.initializeApp()`
+1. `WidgetsFlutterBinding.ensureInitialized()` — must come first (required before any MethodChannel/platform call)
+2. `dotenv.load()` — load API keys from .env
+3. `NotificationService.instance.initialize()` — timezone + notification plugin setup
+4. `Firebase.initializeApp()`
 
 **Data model (Firestore):**
 ```
