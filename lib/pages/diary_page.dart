@@ -59,7 +59,6 @@ class _DiaryPageState extends State<DiaryPage> {
   final List<Map<String, String>> _messages = []; // 画面に表示する会話履歴
   String? _diary; // 生成された日記テキスト
   String? _existingDiary; // 既存の日記テキスト（追記時に使用）
-  int _addendumStartIndex = 0; // 追記インタビュー開始時点の_messagesインデックス
   bool _isLoading = false;
   bool _diaryGenerated = false;
   bool _showExistingDiaryChoice = false; // 追記 or 確認の選択肢を表示するフラグ
@@ -176,8 +175,7 @@ class _DiaryPageState extends State<DiaryPage> {
       return;
     }
 
-    // 追記する → インタビュー開始インデックスを記録してから質問フローを開始
-    _addendumStartIndex = _messages.length;
+    // 追記する → 質問フローを開始
     setState(() => _isLoading = true);
     try {
       final settings = await _firestore.getUserSettings(_uid!);
@@ -394,6 +392,7 @@ class _DiaryPageState extends State<DiaryPage> {
           );
         } else {
           // 「自分で入力」→ テキスト編集ページへ
+          // 追記モードの場合は既存日記を初期値として渡す
           if (mounted) {
             Navigator.push(
               context,
@@ -402,6 +401,7 @@ class _DiaryPageState extends State<DiaryPage> {
                   uid: _uid!,
                   today: _today!,
                   firestore: _firestore,
+                  initialDiary: _existingDiary,
                 ),
               ),
             );
@@ -538,7 +538,8 @@ class _DiaryPageState extends State<DiaryPage> {
       final additionalContext = _buildAdditionalContext();
       final diary = _existingDiary != null
           ? await _gemini.generateDiaryWithExisting(
-              _existingDiary!, _messages.sublist(_addendumStartIndex))
+              _existingDiary!, eventMessages,
+              additionalContext: additionalContext)
           : await _gemini.generateDiary(eventMessages,
               additionalContext: additionalContext);
       await Future.wait([
