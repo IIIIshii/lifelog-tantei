@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../core/theme/detective_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/detective_text_styles.dart';
 import '../services/firestore_service.dart';
 import 'diary_detail_page.dart';
 
@@ -13,23 +14,26 @@ class DiaryListPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final entriesRef = FirestoreService().entriesQuery(uid);
+    final c = context.colors;
 
     return Scaffold(
-      backgroundColor: DetectiveTheme.background,
+      backgroundColor: c.background,
 
       // ── AppBar ──────────────────────────────────────────────
       appBar: AppBar(
-        backgroundColor: DetectiveTheme.appBarBg,
-        foregroundColor: const Color(0xFFE8DCC8),
+        backgroundColor: c.appBarBg,
+        foregroundColor: c.appBarFg,
         elevation: 0,
         toolbarHeight: 64,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('事件簿アーカイブ', style: DetectiveTheme.appBarTitle),
+            Text('事件簿アーカイブ',
+                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
             const SizedBox(height: 2),
-            const Text('― 過去の記録を参照する ―',
-                style: DetectiveTheme.appBarSubtitle),
+            Text('― 過去の記録を参照する ―',
+                style: DetectiveTextStyles.appBarSubtitle(
+                    color: c.appBarSubtitle)),
           ],
         ),
       ),
@@ -41,8 +45,8 @@ class DiaryListPage extends StatelessWidget {
         builder: (context, snapshot) {
           // 読み込み中: ゴールドのローディングインジケーター
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(color: DetectiveTheme.gold),
+            return Center(
+              child: CircularProgressIndicator(color: c.gold),
             );
           }
 
@@ -56,17 +60,16 @@ class DiaryListPage extends StatelessWidget {
               .toList()
             ..sort((a, b) => b.id.compareTo(a.id));
           if (docs.isEmpty) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.folder_open,
-                      size: 48, color: DetectiveTheme.cardBorder),
-                  SizedBox(height: 12),
+                  Icon(Icons.folder_open, size: 48, color: c.cardBorder),
+                  const SizedBox(height: 12),
                   Text(
                     'まだ事件の記録がありません',
                     style: TextStyle(
-                      color: DetectiveTheme.textSecondary,
+                      color: c.textSecondary,
                       fontSize: 14,
                     ),
                   ),
@@ -136,11 +139,12 @@ class _CaseArchiveItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     return Material(
-      color: DetectiveTheme.cardBg,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(4)),
-        side: BorderSide(color: DetectiveTheme.cardBorder),
+      color: c.cardBg,
+      shape: RoundedRectangleBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(4)),
+        side: BorderSide(color: c.cardBorder),
       ),
       child: InkWell(
         onTap: onTap,
@@ -154,9 +158,9 @@ class _CaseArchiveItem extends StatelessWidget {
               // 左端のゴールドアクセントボーダー（ホームカードと同スタイル）
               Container(
                 width: 4,
-                decoration: const BoxDecoration(
-                  color: DetectiveTheme.gold,
-                  borderRadius: BorderRadius.only(
+                decoration: BoxDecoration(
+                  color: c.gold,
+                  borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(4),
                     bottomLeft: Radius.circular(4),
                   ),
@@ -174,15 +178,14 @@ class _CaseArchiveItem extends StatelessWidget {
                       // 日付（ゴールド太字でアーカイブ番号のように見せる）
                       Row(
                         children: [
-                          const Icon(Icons.folder_open,
-                              size: 14, color: DetectiveTheme.gold),
+                          Icon(Icons.folder_open, size: 14, color: c.gold),
                           const SizedBox(width: 6),
                           Text(
                             _formatDate(date),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
-                              color: DetectiveTheme.gold,
+                              color: c.gold,
                             ),
                           ),
                         ],
@@ -193,9 +196,9 @@ class _CaseArchiveItem extends StatelessWidget {
                         diary,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
-                          color: DetectiveTheme.textSecondary,
+                          color: c.textSecondary,
                           height: 1.5,
                         ),
                       ),
@@ -205,10 +208,10 @@ class _CaseArchiveItem extends StatelessWidget {
               ),
 
               // 右端の矢印アイコン
-              const Padding(
-                padding: EdgeInsets.only(right: 12),
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
                 child: Icon(Icons.chevron_right,
-                    color: DetectiveTheme.goldLight, size: 20),
+                    color: c.goldLight, size: 20),
               ),
             ],
           ),

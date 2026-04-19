@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../core/theme/detective_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/detective_text_styles.dart';
 import '../services/auth_service.dart';
 import 'diary_page.dart';
 import 'analytics_page.dart';
@@ -32,22 +33,25 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     return Scaffold(
-      backgroundColor: DetectiveTheme.background,
+      backgroundColor: c.background,
 
       // ── AppBar ──────────────────────────────────────────────
       // タイトルにサブタイトルを重ねることで探偵事務所の看板風に見せる
       appBar: AppBar(
-        backgroundColor: DetectiveTheme.appBarBg,
+        backgroundColor: c.appBarBg,
         elevation: 0,
         toolbarHeight: 64,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('ライフログ探偵', style: DetectiveTheme.appBarTitle),
+            Text('ライフログ探偵',
+                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
             const SizedBox(height: 2),
-            const Text('― 事件、受け付けます ―',
-                style: DetectiveTheme.appBarSubtitle),
+            Text('― 事件、受け付けます ―',
+                style: DetectiveTextStyles.appBarSubtitle(
+                    color: c.appBarSubtitle)),
           ],
         ),
       ),
@@ -59,9 +63,9 @@ class _HomePageState extends State<HomePage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // キャッチコピー
-            const Text(
+            Text(
               '今日も新たな記録が待っている——',
-              style: DetectiveTheme.catchphrase,
+              style: DetectiveTextStyles.catchphrase(color: c.textSecondary),
             ),
             const SizedBox(height: 28),
 
@@ -150,6 +154,7 @@ class _CaseFileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     // タブ部分の高さ（フォルダータブを再現する）
     const double tabHeight = 22.0;
+    final c = context.colors;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -160,28 +165,29 @@ class _CaseFileCard extends StatelessWidget {
         Container(
           height: tabHeight,
           padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: const BoxDecoration(
-            color: DetectiveTheme.goldLight,
-            borderRadius: BorderRadius.only(
+          decoration: BoxDecoration(
+            color: c.goldLight,
+            borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(4),
               topRight: Radius.circular(8),
             ),
           ),
           alignment: Alignment.center,
-          child: Text(caseNumber, style: DetectiveTheme.caseNumber),
+          child: Text(caseNumber,
+              style: DetectiveTextStyles.caseNumber(color: c.caseNumberFg)),
         ),
 
         // ── メインカード本体 ──────────────────────────────────
         // タブの直下に配置し、左上の角だけ角丸なしにしてタブとの接続を自然に見せる
         Material(
-          color: DetectiveTheme.cardBg,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.only(
+          color: c.cardBg,
+          shape: RoundedRectangleBorder(
+            borderRadius: const BorderRadius.only(
               topRight: Radius.circular(4),
               bottomLeft: Radius.circular(4),
               bottomRight: Radius.circular(4),
             ),
-            side: BorderSide(color: DetectiveTheme.cardBorder),
+            side: BorderSide(color: c.cardBorder),
           ),
           child: InkWell(
             onTap: onTap,
@@ -199,9 +205,9 @@ class _CaseFileCard extends StatelessWidget {
                   // 左端のゴールドアクセントボーダー
                   Container(
                     width: 4,
-                    decoration: const BoxDecoration(
-                      color: DetectiveTheme.gold,
-                      borderRadius: BorderRadius.only(
+                    decoration: BoxDecoration(
+                      color: c.gold,
+                      borderRadius: const BorderRadius.only(
                         bottomLeft: Radius.circular(4),
                       ),
                     ),
@@ -215,8 +221,7 @@ class _CaseFileCard extends StatelessWidget {
                       child: Row(
                         children: [
                           // アイコン
-                          Icon(icon,
-                              color: DetectiveTheme.gold, size: 28),
+                          Icon(icon, color: c.gold, size: 28),
                           const SizedBox(width: 16),
 
                           // タイトル + サブタイトル
@@ -224,18 +229,19 @@ class _CaseFileCard extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(title,
-                                  style: DetectiveTheme.cardTitle),
+                                  style: DetectiveTextStyles.cardTitle(
+                                      color: c.textPrimary)),
                               const SizedBox(height: 2),
                               Text(subtitle,
-                                  style: DetectiveTheme.cardSubtitle),
+                                  style: DetectiveTextStyles.cardSubtitle(
+                                      color: c.textSecondary)),
                             ],
                           ),
 
                           const Spacer(),
 
                           // 右端の矢印
-                          const Icon(Icons.chevron_right,
-                              color: DetectiveTheme.goldLight),
+                          Icon(Icons.chevron_right, color: c.goldLight),
                         ],
                       ),
                     ),

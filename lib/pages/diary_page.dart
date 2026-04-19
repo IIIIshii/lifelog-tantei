@@ -1,7 +1,8 @@
 import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import '../core/theme/detective_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/detective_text_styles.dart';
 import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
@@ -558,25 +559,28 @@ class _DiaryPageState extends State<DiaryPage> {
   }
 
   // 選択肢が多い場合のドロップダウンUI
+  // 注意: 引数 `choices` はロジック上の選択肢リスト。色トークンを表す `c` と
+  // 名前衝突しないよう変数名に注意する。
   Widget _buildDropdown(List<String> choices) {
+    final c = context.colors;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF2A1A0E),
+        color: c.appBarBg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: DetectiveTheme.gold.withValues(alpha: 0.5)),
+        border: Border.all(color: c.gold.withValues(alpha: 0.5)),
       ),
       child: DropdownButton<String>(
         value: null,
-        hint: const Text('選択してください',
-            style: TextStyle(color: Color(0xFFB0A090))),
+        hint: Text('選択してください',
+            style: TextStyle(color: c.appBarSubtitle)),
         isExpanded: true,
         underline: const SizedBox.shrink(),
-        dropdownColor: const Color(0xFF2A1A0E),
-        style: const TextStyle(color: Color(0xFFE8DCC8)),
+        dropdownColor: c.appBarBg,
+        style: TextStyle(color: c.appBarFg),
         items: choices
-            .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+            .map((choice) => DropdownMenuItem(value: choice, child: Text(choice)))
             .toList(),
         onChanged: (val) {
           if (val != null) _sendUserReply(val);
@@ -587,6 +591,7 @@ class _DiaryPageState extends State<DiaryPage> {
 
   // 選択肢が少ない場合のボタンUI
   Widget _buildChoiceButtons(List<String> choices) {
+    final c = context.colors;
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -594,8 +599,8 @@ class _DiaryPageState extends State<DiaryPage> {
         return ElevatedButton(
           onPressed: () => _sendUserReply(choice),
           style: ElevatedButton.styleFrom(
-            backgroundColor: DetectiveTheme.gold,
-            foregroundColor: Colors.white,
+            backgroundColor: c.gold,
+            foregroundColor: c.appBarFg,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
@@ -651,23 +656,26 @@ class _DiaryPageState extends State<DiaryPage> {
         _phase != _Phase.diaryView &&
         _phase != _Phase.done;
 
+    final c = context.colors;
     return Scaffold(
-      backgroundColor: DetectiveTheme.background,
+      backgroundColor: c.background,
 
       // ── AppBar ──────────────────────────────────────────────
       // 設定ページ・ホームと同じくサブタイトル付きで捜査中の雰囲気を演出する
       appBar: AppBar(
-        backgroundColor: DetectiveTheme.appBarBg,
-        foregroundColor: const Color(0xFFE8DCC8),
+        backgroundColor: c.appBarBg,
+        foregroundColor: c.appBarFg,
         elevation: 0,
         toolbarHeight: 64,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('新規捜査', style: DetectiveTheme.appBarTitle),
+            Text('新規捜査',
+                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
             const SizedBox(height: 2),
-            const Text('― 証拠を集める ―',
-                style: DetectiveTheme.appBarSubtitle),
+            Text('― 証拠を集める ―',
+                style: DetectiveTextStyles.appBarSubtitle(
+                    color: c.appBarSubtitle)),
           ],
         ),
         actions: [
@@ -704,10 +712,10 @@ class _DiaryPageState extends State<DiaryPage> {
             ),
           ),
           if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.all(12.0),
+            Padding(
+              padding: const EdgeInsets.all(12.0),
               // ゴールドのローディングインジケーターでテーマに統一する
-              child: CircularProgressIndicator(color: DetectiveTheme.gold),
+              child: CircularProgressIndicator(color: c.gold),
             ),
           // 追記 or 確認の選択肢ボタン
           if (_showExistingDiaryChoice && !_isLoading)
@@ -721,8 +729,8 @@ class _DiaryPageState extends State<DiaryPage> {
                       child: ElevatedButton(
                         onPressed: () => _handleExistingDiaryChoice(choice),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF5C3D2E),
-                          foregroundColor: Colors.white,
+                          backgroundColor: c.bubbleUser,
+                          foregroundColor: c.textPrimary,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(20),
@@ -755,8 +763,8 @@ class _DiaryPageState extends State<DiaryPage> {
                       child: OutlinedButton(
                         onPressed: () => Navigator.pop(context),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: DetectiveTheme.gold,
-                          side: const BorderSide(color: DetectiveTheme.gold),
+                          foregroundColor: c.gold,
+                          side: BorderSide(color: c.gold),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(20)),
@@ -781,8 +789,8 @@ class _DiaryPageState extends State<DiaryPage> {
                           ),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: DetectiveTheme.gold,
-                          foregroundColor: Colors.white,
+                          backgroundColor: c.gold,
+                          foregroundColor: c.appBarFg,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(20)),
@@ -811,9 +819,11 @@ class _DiaryPageState extends State<DiaryPage> {
                             onPressed: () => _handleDiaryViewChoice(label),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: label == 'これを記録'
-                                  ? DetectiveTheme.gold
-                                  : const Color(0xFF5C3D2E),
-                              foregroundColor: Colors.white,
+                                  ? c.gold
+                                  : c.bubbleUser,
+                              foregroundColor: label == 'これを記録'
+                                  ? c.appBarFg
+                                  : c.textPrimary,
                               padding:
                                   const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(
@@ -836,9 +846,8 @@ class _DiaryPageState extends State<DiaryPage> {
                           child: OutlinedButton(
                             onPressed: () => _handleDiaryViewChoice(label),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: DetectiveTheme.gold,
-                              side: const BorderSide(
-                                  color: DetectiveTheme.gold, width: 1),
+                              foregroundColor: c.gold,
+                              side: BorderSide(color: c.gold, width: 1),
                               padding:
                                   const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(
@@ -868,9 +877,8 @@ class _DiaryPageState extends State<DiaryPage> {
                       child: OutlinedButton(
                         onPressed: () => Navigator.pop(context),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: DetectiveTheme.gold,
-                          side: const BorderSide(
-                              color: DetectiveTheme.gold, width: 1),
+                          foregroundColor: c.gold,
+                          side: BorderSide(color: c.gold, width: 1),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(20),
@@ -894,8 +902,8 @@ class _DiaryPageState extends State<DiaryPage> {
                           );
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: DetectiveTheme.gold,
-                          foregroundColor: Colors.white,
+                          backgroundColor: c.gold,
+                          foregroundColor: c.appBarFg,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(20),
