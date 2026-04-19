@@ -15,10 +15,15 @@ class DiaryPrompts {
   }
 
   // 既存日記と追記インタビューを統合する日記生成プロンプトを組み立てる。
+  // additionalContext: カスタム質問・思い出しアシストの回答など
   static String buildDiaryWithExistingPrompt(
-      String existingDiary, String conversationHistory) {
+      String existingDiary, String conversationHistory,
+      {String additionalContext = ''}) {
+    final extra = additionalContext.isNotEmpty
+        ? '\n\n【参考情報（日記に自然に織り込むこと）】\n$additionalContext'
+        : '';
     return '以下は今日すでに記録された捜査ログです：\n$existingDiary\n\n'
-        '以下は追加で得られた証言です：\n$conversationHistory\n\n'
+        '以下は追加で得られた証言です：\n$conversationHistory$extra\n\n'
         '二つの内容を自然に統合し、捜査ログとして再記録してください。';
   }
 }

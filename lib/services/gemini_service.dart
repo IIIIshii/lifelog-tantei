@@ -53,11 +53,14 @@ class GeminiService {
   }
 
   // 既存の日記と追記インタビューの会話を統合して日記テキストをGeminiに生成させる
+  // additionalContext: カスタム質問・思い出しアシストの回答など、追加で含めるコンテキスト
   Future<String> generateDiaryWithExisting(
-      String existingDiary, List<Map<String, String>> messages) async {
+      String existingDiary, List<Map<String, String>> messages,
+      {String additionalContext = ''}) async {
     final history = _buildHistory(messages);
-    final prompt =
-        DiaryPrompts.buildDiaryWithExistingPrompt(existingDiary, history);
+    final prompt = DiaryPrompts.buildDiaryWithExistingPrompt(
+        existingDiary, history,
+        additionalContext: additionalContext);
     final response = await _diaryModel.generateContent([
       Content.text(prompt),
     ]);
