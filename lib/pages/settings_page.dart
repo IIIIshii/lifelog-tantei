@@ -7,6 +7,7 @@ import '../core/theme/detective_theme.dart';
 import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/notification_service.dart';
 
 // ユーザーが捜査（記録）方針を設定する画面
 // 記録項目のON/OFFとカスタム質問の管理を行う
@@ -60,6 +61,37 @@ class _SettingsPageState extends State<SettingsPage> {
     });
     await _firestore.saveUserSettings(_uid!, newSettings);
     setState(() => _isSaving = false);
+  }
+
+  // 通知ON/OFFを切り替えてスケジュールを更新する
+  Future<void> _toggleNotification(bool enabled) async {
+    final newSettings = _settings.copyWith(notificationEnabled: enabled);
+    await _save(newSettings);
+    if (enabled) {
+      await NotificationService.instance
+          .schedule(newSettings.notificationHour, newSettings.notificationMinute);
+    } else {
+      await NotificationService.instance.cancel();
+    }
+  }
+
+  // 時刻ピッカーを表示して通知時刻を更新する
+  Future<void> _pickNotificationTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: _settings.notificationHour,
+        minute: _settings.notificationMinute,
+      ),
+    );
+    if (picked == null) return;
+    await _save(_settings.copyWith(
+      notificationHour: picked.hour,
+      notificationMinute: picked.minute,
+    ));
+    if (_settings.notificationEnabled) {
+      await NotificationService.instance.schedule(picked.hour, picked.minute);
+    }
   }
 
   // テキストフィールドの内容をカスタム質問リストに追加して保存する
@@ -381,6 +413,76 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   const SizedBox(height: 28),
                 ],
+
+                // ── セクション: 通知設定 ──────────────────────
+                const _SectionHeader(
+                  title: '◆ 通知設定',
+                  subtitle: '日記を書く時刻にリマインダーを受け取る',
+                ),
+                const SizedBox(height: 8),
+                _SettingsCard(
+                  children: [
+                    SwitchListTile(
+                      title: const Text(
+                        '毎日リマインダー',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: DetectiveTheme.textPrimary,
+                        ),
+                      ),
+                      subtitle: const Text(
+                        '設定した時刻に通知で日記を促します',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: DetectiveTheme.textSecondary,
+                        ),
+                      ),
+                      value: _settings.notificationEnabled,
+                      onChanged: _toggleNotification,
+                      activeThumbColor: DetectiveTheme.gold,
+                      activeTrackColor: DetectiveTheme.goldLight,
+                    ),
+                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
+                    ListTile(
+                      leading: Icon(
+                        Icons.access_time,
+                        color: _settings.notificationEnabled
+                            ? DetectiveTheme.gold
+                            : DetectiveTheme.textSecondary,
+                      ),
+                      title: Text(
+                        '通知時刻',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: _settings.notificationEnabled
+                              ? DetectiveTheme.textPrimary
+                              : DetectiveTheme.textSecondary,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '${_settings.notificationHour.toString().padLeft(2, '0')}:${_settings.notificationMinute.toString().padLeft(2, '0')}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _settings.notificationEnabled
+                              ? DetectiveTheme.gold
+                              : DetectiveTheme.textSecondary,
+                        ),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        color: _settings.notificationEnabled
+                            ? DetectiveTheme.textSecondary
+                            : DetectiveTheme.cardBorder,
+                      ),
+                      onTap: _settings.notificationEnabled
+                          ? _pickNotificationTime
+                          : null,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 28),
 
                 // ── セクション: エクスポート ──────────────────────
                 const _SectionHeader(
