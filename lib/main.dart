@@ -4,11 +4,13 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'pages/home_page.dart';
+import 'services/notification_service.dart';
 
 // アプリのエントリーポイント。dotenv→Firebase→テーマロードの順で初期化する
 void main() async {
   await dotenv.load(fileName: ".env"); // .envからAPIキーを読み込む（最初に実行）
   WidgetsFlutterBinding.ensureInitialized(); // Flutter初期化
+  await NotificationService.instance.initialize(); // 通知プラグイン初期化
   await Firebase.initializeApp(); // Firebase初期化
   // SharedPreferencesからテーマを読む。await することで最初のフレームから
   // 正しいテーマで描画でき、"デフォルト→選択テーマ"のチラつきを避けられる。

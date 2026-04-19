@@ -7,6 +7,9 @@ class UserSettings {
   final bool recordExercise; // 運動習慣を記録するか
   final bool recordStudy; // 勉強内容を記録するか
   final List<String> customQuestions; // ユーザーが自由に追加したカスタム質問リスト
+  final bool notificationEnabled; // 毎日リマインダー通知を送るか
+  final int notificationHour; // 通知時刻：時（0–23）
+  final int notificationMinute; // 通知時刻：分（0–59）
 
   const UserSettings({
     this.recordEvent = true,
@@ -16,6 +19,9 @@ class UserSettings {
     this.recordExercise = false,
     this.recordStudy = false,
     this.customQuestions = const [],
+    this.notificationEnabled = false,
+    this.notificationHour = 21,
+    this.notificationMinute = 0,
   });
 
   // デフォルト設定を返すファクトリ
@@ -32,6 +38,9 @@ class UserSettings {
       recordStudy: map['recordStudy'] as bool? ?? false,
       customQuestions:
           (map['customQuestions'] as List<dynamic>?)?.cast<String>() ?? [],
+      notificationEnabled: map['notificationEnabled'] as bool? ?? false,
+      notificationHour: map['notificationHour'] as int? ?? 21,
+      notificationMinute: map['notificationMinute'] as int? ?? 0,
     );
   }
 
@@ -45,6 +54,9 @@ class UserSettings {
       'recordExercise': recordExercise,
       'recordStudy': recordStudy,
       'customQuestions': customQuestions,
+      'notificationEnabled': notificationEnabled,
+      'notificationHour': notificationHour,
+      'notificationMinute': notificationMinute,
     };
   }
 
@@ -57,6 +69,9 @@ class UserSettings {
     bool? recordExercise,
     bool? recordStudy,
     List<String>? customQuestions,
+    bool? notificationEnabled,
+    int? notificationHour,
+    int? notificationMinute,
   }) {
     return UserSettings(
       recordEvent: recordEvent ?? this.recordEvent,
@@ -66,6 +81,9 @@ class UserSettings {
       recordExercise: recordExercise ?? this.recordExercise,
       recordStudy: recordStudy ?? this.recordStudy,
       customQuestions: customQuestions ?? this.customQuestions,
+      notificationEnabled: notificationEnabled ?? this.notificationEnabled,
+      notificationHour: notificationHour ?? this.notificationHour,
+      notificationMinute: notificationMinute ?? this.notificationMinute,
     );
   }
 }
