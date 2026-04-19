@@ -452,33 +452,33 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsCard(
                   children: [
                     SwitchListTile(
-                      title: const Text(
+                      title: Text(
                         '毎日リマインダー',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
-                          color: DetectiveTheme.textPrimary,
+                          color: c.textPrimary,
                         ),
                       ),
-                      subtitle: const Text(
+                      subtitle: Text(
                         '設定した時刻に通知で日記を促します',
                         style: TextStyle(
                           fontSize: 12,
-                          color: DetectiveTheme.textSecondary,
+                          color: c.textSecondary,
                         ),
                       ),
                       value: _settings.notificationEnabled,
                       onChanged: _toggleNotification,
-                      activeThumbColor: DetectiveTheme.gold,
-                      activeTrackColor: DetectiveTheme.goldLight,
+                      activeThumbColor: c.gold,
+                      activeTrackColor: c.goldLight,
                     ),
-                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
+                    Divider(height: 1, color: c.cardBorder),
                     ListTile(
                       leading: Icon(
                         Icons.access_time,
                         color: _settings.notificationEnabled
-                            ? DetectiveTheme.gold
-                            : DetectiveTheme.textSecondary,
+                            ? c.gold
+                            : c.textSecondary,
                       ),
                       title: Text(
                         '通知時刻',
@@ -486,8 +486,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
                           color: _settings.notificationEnabled
-                              ? DetectiveTheme.textPrimary
-                              : DetectiveTheme.textSecondary,
+                              ? c.textPrimary
+                              : c.textSecondary,
                         ),
                       ),
                       subtitle: Text(
@@ -495,15 +495,15 @@ class _SettingsPageState extends State<SettingsPage> {
                         style: TextStyle(
                           fontSize: 12,
                           color: _settings.notificationEnabled
-                              ? DetectiveTheme.gold
-                              : DetectiveTheme.textSecondary,
+                              ? c.gold
+                              : c.textSecondary,
                         ),
                       ),
                       trailing: Icon(
                         Icons.chevron_right,
                         color: _settings.notificationEnabled
-                            ? DetectiveTheme.textSecondary
-                            : DetectiveTheme.cardBorder,
+                            ? c.textSecondary
+                            : c.cardBorder,
                       ),
                       onTap: _settings.notificationEnabled
                           ? _pickNotificationTime
