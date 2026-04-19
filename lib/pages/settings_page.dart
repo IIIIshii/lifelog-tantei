@@ -3,7 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import '../core/theme/detective_theme.dart';
+import '../core/theme/app_colors.dart';
+import '../core/theme/app_theme.dart';
+import '../core/theme/detective_text_styles.dart';
+import '../core/theme/theme_controller.dart';
 import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
@@ -152,35 +155,38 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     return Scaffold(
-      backgroundColor: DetectiveTheme.background,
+      backgroundColor: c.background,
 
       // ── AppBar ──────────────────────────────────────────────
       // ホーム画面と同じくサブタイトル付きで探偵事務所の雰囲気を演出
       appBar: AppBar(
-        backgroundColor: DetectiveTheme.appBarBg,
-        foregroundColor: const Color(0xFFE8DCC8),
+        backgroundColor: c.appBarBg,
+        foregroundColor: c.appBarFg,
         elevation: 0,
         toolbarHeight: 64,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('探偵事務所', style: DetectiveTheme.appBarTitle),
+            Text('探偵事務所',
+                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
             const SizedBox(height: 2),
-            const Text('― 捜査方針を設定する ―',
-                style: DetectiveTheme.appBarSubtitle),
+            Text('― 捜査方針を設定する ―',
+                style: DetectiveTextStyles.appBarSubtitle(
+                    color: c.appBarSubtitle)),
           ],
         ),
         actions: [
           // 保存中はAppBar右端にゴールドのスピナーを表示する
           if (_isSaving)
-            const Padding(
-              padding: EdgeInsets.all(16),
+            Padding(
+              padding: const EdgeInsets.all(16),
               child: SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
-                  color: DetectiveTheme.goldLight,
+                  color: c.goldLight,
                   strokeWidth: 2,
                 ),
               ),
@@ -190,9 +196,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
       // ── Body ────────────────────────────────────────────────
       body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: DetectiveTheme.gold),
-            )
+          ? Center(child: CircularProgressIndicator(color: c.gold))
           : ListView(
               padding: const EdgeInsets.all(20),
               children: [
@@ -211,7 +215,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       value: true,
                       onChanged: null,
                     ),
-                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
+                    Divider(height: 1, color: c.cardBorder),
                     _SettingsTile(
                       title: '思い出しアシスト',
                       subtitle: '午前・午後・夜に何をしたか追加で聞きます',
@@ -219,7 +223,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) =>
                           _save(_settings.copyWith(recallAssist: v)),
                     ),
-                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
+                    Divider(height: 1, color: c.cardBorder),
                     _SettingsTile(
                       title: '睡眠時間',
                       subtitle: '昨夜の睡眠について記録します',
@@ -227,7 +231,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) =>
                           _save(_settings.copyWith(recordSleep: v)),
                     ),
-                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
+                    Divider(height: 1, color: c.cardBorder),
                     _SettingsTile(
                       title: '食べたもの',
                       subtitle: '今日の食事について記録します',
@@ -235,7 +239,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) =>
                           _save(_settings.copyWith(recordFood: v)),
                     ),
-                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
+                    Divider(height: 1, color: c.cardBorder),
                     _SettingsTile(
                       title: '運動習慣',
                       subtitle: '今日の運動について記録します',
@@ -243,7 +247,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) =>
                           _save(_settings.copyWith(recordExercise: v)),
                     ),
-                    const Divider(height: 1, color: DetectiveTheme.cardBorder),
+                    Divider(height: 1, color: c.cardBorder),
                     _SettingsTile(
                       title: '勉強内容',
                       subtitle: '今日の勉強について記録します',
@@ -271,33 +275,29 @@ class _SettingsPageState extends State<SettingsPage> {
                           ListTile(
                             title: Text(
                               entry.value,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 14,
-                                color: DetectiveTheme.textPrimary,
+                                color: c.textPrimary,
                               ),
                             ),
                             // 削除ボタン
                             trailing: IconButton(
-                              icon: const Icon(Icons.delete_outline,
-                                  color: DetectiveTheme.textSecondary,
-                                  size: 20),
+                              icon: Icon(Icons.delete_outline,
+                                  color: c.textSecondary, size: 20),
                               onPressed: () =>
                                   _removeCustomQuestion(entry.key),
                             ),
                           ),
                           if (entry.key <
                               _settings.customQuestions.length - 1)
-                            const Divider(
-                                height: 1,
-                                color: DetectiveTheme.cardBorder),
+                            Divider(height: 1, color: c.cardBorder),
                         ],
                       );
                     }),
 
                     // 既存質問がある場合は区切り線を入れる
                     if (_settings.customQuestions.isNotEmpty)
-                      const Divider(
-                          height: 1, color: DetectiveTheme.cardBorder),
+                      Divider(height: 1, color: c.cardBorder),
 
                     // 新しいカスタム質問を入力・追加するフィールド
                     Padding(
@@ -308,14 +308,14 @@ class _SettingsPageState extends State<SettingsPage> {
                           Expanded(
                             child: TextField(
                               controller: _customQuestionController,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 14,
-                                color: DetectiveTheme.textPrimary,
+                                color: c.textPrimary,
                               ),
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 hintText: '質問を追加（例：今日の天気は？）',
                                 hintStyle: TextStyle(
-                                  color: DetectiveTheme.textSecondary,
+                                  color: c.textSecondary,
                                   fontSize: 13,
                                 ),
                                 border: InputBorder.none,
@@ -325,14 +325,44 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           // 追加ボタン（ゴールドアイコン）
                           IconButton(
-                            icon: const Icon(Icons.add_circle,
-                                color: DetectiveTheme.gold),
+                            icon: Icon(Icons.add_circle, color: c.gold),
                             onPressed: _addCustomQuestion,
                           ),
                         ],
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 28),
+
+                // ── セクション: テーマ選択 ──────────────────────
+                // ValueListenableBuilder で ThemeController を購読し、
+                // 選択中テーマの変化でラジオボタンを再描画する
+                const _SectionHeader(
+                  title: '◆ テーマ',
+                  subtitle: 'アプリの見た目を切り替える',
+                ),
+                const SizedBox(height: 8),
+                ValueListenableBuilder<AppThemeName>(
+                  valueListenable: ThemeController.instance.notifier,
+                  builder: (context, currentTheme, _) {
+                    return _SettingsCard(
+                      children: [
+                        for (var i = 0;
+                            i < AppThemeName.values.length;
+                            i++) ...[
+                          _ThemeTile(
+                            name: AppThemeName.values[i],
+                            selected: currentTheme == AppThemeName.values[i],
+                            onTap: () => ThemeController.instance
+                                .setTheme(AppThemeName.values[i]),
+                          ),
+                          if (i < AppThemeName.values.length - 1)
+                            Divider(height: 1, color: c.cardBorder),
+                        ],
+                      ],
+                    );
+                  },
                 ),
                 const SizedBox(height: 28),
 
@@ -347,34 +377,33 @@ class _SettingsPageState extends State<SettingsPage> {
                   _SettingsCard(
                     children: [
                       ListTile(
-                        leading: const Icon(Icons.bug_report_outlined,
-                            color: DetectiveTheme.gold),
-                        title: const Text(
+                        leading: Icon(Icons.bug_report_outlined, color: c.gold),
+                        title: Text(
                           'モックデータを書き込む',
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
-                            color: DetectiveTheme.textPrimary,
+                            color: c.textPrimary,
                           ),
                         ),
-                        subtitle: const Text(
+                        subtitle: Text(
                           '直近7日分のサンプル日記を上書き保存します',
                           style: TextStyle(
                             fontSize: 12,
-                            color: DetectiveTheme.textSecondary,
+                            color: c.textSecondary,
                           ),
                         ),
                         trailing: _isSeeding
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 20,
                                 height: 20,
                                 child: CircularProgressIndicator(
-                                  color: DetectiveTheme.gold,
+                                  color: c.gold,
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Icon(Icons.chevron_right,
-                                color: DetectiveTheme.textSecondary),
+                            : Icon(Icons.chevron_right,
+                                color: c.textSecondary),
                         onTap: _isSeeding ? null : _seedMockData,
                       ),
                     ],
@@ -391,34 +420,33 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsCard(
                   children: [
                     ListTile(
-                      leading: const Icon(Icons.download_outlined,
-                          color: DetectiveTheme.gold),
-                      title: const Text(
+                      leading: Icon(Icons.download_outlined, color: c.gold),
+                      title: Text(
                         'CSVでエクスポート',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w500,
-                          color: DetectiveTheme.textPrimary,
+                          color: c.textPrimary,
                         ),
                       ),
-                      subtitle: const Text(
+                      subtitle: Text(
                         '全ての日記をCSVファイルとして書き出します',
                         style: TextStyle(
                           fontSize: 12,
-                          color: DetectiveTheme.textSecondary,
+                          color: c.textSecondary,
                         ),
                       ),
                       trailing: _isExporting
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(
-                                color: DetectiveTheme.gold,
+                                color: c.gold,
                                 strokeWidth: 2,
                               ),
                             )
-                          : const Icon(Icons.chevron_right,
-                              color: DetectiveTheme.textSecondary),
+                          : Icon(Icons.chevron_right,
+                              color: c.textSecondary),
                       onTap: _isExporting ? null : _exportCsv,
                     ),
                   ],
@@ -443,24 +471,25 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.bold,
-            color: DetectiveTheme.gold,
+            color: c.gold,
             letterSpacing: 0.5,
           ),
         ),
         const SizedBox(height: 2),
         Text(
           subtitle,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 11,
-            color: DetectiveTheme.textSecondary,
+            color: c.textSecondary,
           ),
         ),
       ],
@@ -481,11 +510,12 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     return Container(
       decoration: BoxDecoration(
-        color: DetectiveTheme.cardBg,
+        color: c.cardBg,
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: DetectiveTheme.cardBorder),
+        border: Border.all(color: c.cardBorder),
       ),
       // ClipRRectでカード内のウィジェットが角丸からはみ出ないようにする
       child: ClipRRect(
@@ -517,27 +547,125 @@ class _SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
     return SwitchListTile(
       title: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w500,
-          color: DetectiveTheme.textPrimary,
+          color: c.textPrimary,
         ),
       ),
       subtitle: Text(
         subtitle,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12,
-          color: DetectiveTheme.textSecondary,
+          color: c.textSecondary,
         ),
       ),
       value: value,
       onChanged: onChanged,
       // アクティブ時はゴールドで探偵テーマに統一（activeColorはv3.31以降非推奨）
-      activeThumbColor: DetectiveTheme.gold,
-      activeTrackColor: DetectiveTheme.goldLight,
+      activeThumbColor: c.gold,
+      activeTrackColor: c.goldLight,
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// テーマ選択用の1行タイル
+//
+// 左にテーマのカラーパレットプレビュー（3色ドット）、
+// 中央にテーマ名と説明、右に選択状態のラジオ風マークを表示する。
+// タップで onTap を発火させて ThemeController.setTheme() を呼ぶ。
+// ──────────────────────────────────────────────────────────────
+class _ThemeTile extends StatelessWidget {
+  final AppThemeName name;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ThemeTile({
+    required this.name,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    // そのテーマ自体の色を引いてプレビューに使う（ライブプレビュー）
+    final preview = colorsOf(name);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            // ── カラーパレットプレビュー（3色ドット） ──
+            _ColorDot(color: preview.background, border: preview.cardBorder),
+            const SizedBox(width: 4),
+            _ColorDot(color: preview.appBarBg, border: preview.cardBorder),
+            const SizedBox(width: 4),
+            _ColorDot(color: preview.gold, border: preview.cardBorder),
+            const SizedBox(width: 16),
+
+            // ── テーマ名と説明 ──
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name.label,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: c.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    name.description,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: c.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── 選択状態マーク（チェック or 空円） ──
+            Icon(
+              selected
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked,
+              color: selected ? c.gold : c.textSecondary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// テーマプレビュー用の小さな色ドット
+class _ColorDot extends StatelessWidget {
+  final Color color;
+  final Color border;
+  const _ColorDot({required this.color, required this.border});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 14,
+      height: 14,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: border, width: 1),
+      ),
     );
   }
 }

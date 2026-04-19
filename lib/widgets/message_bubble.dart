@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../core/theme/detective_theme.dart';
+import '../core/theme/app_colors.dart';
 
 // 会話の1メッセージを尋問ログ風に表示するウィジェット
 // AI（探偵）は左寄せ・クリーム背景、ユーザー（証言）は右寄せ・薄茶背景で表示する
@@ -12,6 +12,7 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isAI = role == 'ai';
+    final c = context.colors;
 
     return Align(
       alignment: isAI ? Alignment.centerLeft : Alignment.centerRight,
@@ -33,16 +34,15 @@ class MessageBubble extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (isAI) ...[
-                    const Icon(Icons.search,
-                        size: 11, color: DetectiveTheme.gold),
+                    Icon(Icons.search, size: 11, color: c.gold),
                     const SizedBox(width: 3),
                   ],
                   Text(
                     isAI ? '探偵' : '証言',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
-                      color: DetectiveTheme.gold,
+                      color: c.gold,
                       letterSpacing: 1.0,
                     ),
                   ),
@@ -61,9 +61,9 @@ class MessageBubble extends StatelessWidget {
                   if (isAI)
                     Container(
                       width: 3,
-                      decoration: const BoxDecoration(
-                        color: DetectiveTheme.gold,
-                        borderRadius: BorderRadius.only(
+                      decoration: BoxDecoration(
+                        color: c.gold,
+                        borderRadius: const BorderRadius.only(
                           topLeft: Radius.circular(4),
                           bottomLeft: Radius.circular(4),
                         ),
@@ -77,10 +77,8 @@ class MessageBubble extends StatelessWidget {
                           horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
                         // AI: クリーム / User: 薄茶で視覚的に区別する
-                        color: isAI
-                            ? DetectiveTheme.cardBg
-                            : const Color(0xFFE8DDD0),
-                        border: Border.all(color: DetectiveTheme.cardBorder),
+                        color: isAI ? c.bubbleAi : c.bubbleUser,
+                        border: Border.all(color: c.cardBorder),
                         borderRadius: BorderRadius.only(
                           // ボーダーと隣接する角は丸めない（継ぎ目を自然に見せる）
                           topLeft: isAI
@@ -95,9 +93,9 @@ class MessageBubble extends StatelessWidget {
                       ),
                       child: Text(
                         text,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
-                          color: DetectiveTheme.textPrimary,
+                          color: c.textPrimary,
                           height: 1.5,
                         ),
                       ),
@@ -108,9 +106,9 @@ class MessageBubble extends StatelessWidget {
                   if (!isAI)
                     Container(
                       width: 3,
-                      decoration: const BoxDecoration(
-                        color: DetectiveTheme.gold,
-                        borderRadius: BorderRadius.only(
+                      decoration: BoxDecoration(
+                        color: c.gold,
+                        borderRadius: const BorderRadius.only(
                           topRight: Radius.circular(4),
                           bottomRight: Radius.circular(4),
                         ),
