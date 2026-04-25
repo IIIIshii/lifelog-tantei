@@ -70,6 +70,8 @@ class _DiaryPageState extends State<DiaryPage> {
   final Map<String, String> _answers = {}; // 質問キー → 回答テキストのマップ
   final Map<String, double> _numericAnswers = {}; // 質問キー → 数値回答のマップ
 
+  final ScrollController _scrollController = ScrollController();
+
   late final GeminiService _gemini;
   final AuthService _auth = AuthService();
   final FirestoreService _firestore = FirestoreService();
@@ -124,6 +126,7 @@ class _DiaryPageState extends State<DiaryPage> {
   @override
   void dispose() {
     _textController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -340,6 +343,7 @@ class _DiaryPageState extends State<DiaryPage> {
       _currentChoices = choices;
       _pendingKey = key;
     });
+    _scrollToBottom();
   }
 
   // ユーザーの返答を受け取り、現在のフェーズに応じて次のアクションを決める
@@ -370,6 +374,7 @@ class _DiaryPageState extends State<DiaryPage> {
     await _firestore.saveMessage(
         _uid!, _today!, 'user', text, _conversationOrder++);
     setState(() => _messages.add({'role': 'user', 'text': text}));
+    _scrollToBottom();
 
     switch (_phase) {
       case _Phase.custom:
@@ -622,6 +627,19 @@ class _DiaryPageState extends State<DiaryPage> {
     return double.tryParse(text);
   }
 
+  // メッセージ追加後にリストを最下端へスクロールする
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   // エラーダイアログを表示する
   void _showError(String message) {
     if (!mounted) return;
@@ -699,6 +717,7 @@ class _DiaryPageState extends State<DiaryPage> {
         children: [
           Expanded(
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.all(16),
               itemCount: _messages.length + (_diary != null ? 1 : 0),
               itemBuilder: (context, index) {
