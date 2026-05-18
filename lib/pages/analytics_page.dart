@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
-import '../models/user_settings.dart';
+import '../models/custom_question.dart';
+import '../models/day_entry.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 
@@ -21,9 +22,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   bool _isLoading = true;
   // YYYY-MM-DD → 睡眠時間（記録なし日はnull）
   final Map<String, double?> _sleepData = {};
-  // YYYY-MM-DD → エントリ全データ
-  final Map<String, Map<String, dynamic>> _entriesData = {};
-  UserSettings? _settings;
+  // YYYY-MM-DD → DayEntry
+  final Map<String, DayEntry> _entriesData = {};
+  List<CustomQuestion> _customQuestions = [];
 
   static const int _days = 14;
 
@@ -41,26 +42,23 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         return;
       }
 
-      // 並行フェッチ
-      final entriesFuture = _firestore.getRecentEntries(uid, _days);
-      final settingsFuture = _firestore.getUserSettings(uid);
-      final entries = await entriesFuture;
-      final settings = await settingsFuture;
+      // 並行フェッチ（days と customQuestions を同時に取得）
+      final daysFuture = _firestore.getRecentDays(uid, _days);
+      final questionsFuture = _firestore.getActiveCustomQuestions(uid);
+      final days = await daysFuture;
+      final customQuestions = await questionsFuture;
 
       final sleepData = <String, double?>{};
-      final entriesData = <String, Map<String, dynamic>>{};
-      for (final entry in entries) {
-        entriesData[entry.key] = entry.value;
-        final numeric =
-            entry.value['numericAnswers'] as Map<String, dynamic>?;
-        final sleep = numeric?['sleep'];
-        sleepData[entry.key] = sleep != null ? (sleep as num).toDouble() : null;
+      final entriesData = <String, DayEntry>{};
+      for (final day in days) {
+        entriesData[day.date] = day;
+        sleepData[day.date] = day.metrics['sleep'];
       }
 
       setState(() {
         _sleepData.addAll(sleepData);
         _entriesData.addAll(entriesData);
-        _settings = settings;
+        _customQuestions = customQuestions;
         _isLoading = false;
       });
     } catch (_) {
@@ -116,7 +114,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                   _RecordsTable(
                     dates: dates.reversed.toList(), // 新しい順
                     entriesData: _entriesData,
-                    customQuestions: _settings?.customQuestions ?? [],
+                    customQuestions: _customQuestions,
                   ),
                 ],
               ),
@@ -271,8 +269,8 @@ class _SleepChart extends StatelessWidget {
 class _RecordsTable extends StatelessWidget {
   // dates は新しい順（降順）
   final List<String> dates;
-  final Map<String, Map<String, dynamic>> entriesData;
-  final List<String> customQuestions;
+  final Map<String, DayEntry> entriesData;
+  final List<CustomQuestion> customQuestions;
 
   const _RecordsTable({
     required this.dates,
@@ -290,11 +288,8 @@ class _RecordsTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final customHeaders = customQuestions
-        .asMap()
-        .entries
-        .map((e) => _truncate(e.value, 10))
-        .toList();
+    final customHeaders =
+        customQuestions.map((q) => _truncate(q.text, 10)).toList();
     final allHeaders = [..._fixedHeaders, ...customHeaders];
 
     return Container(
@@ -327,8 +322,7 @@ class _RecordsTable extends StatelessWidget {
               .map((h) => DataColumn(label: Text(h)))
               .toList(),
           rows: dates.map((date) {
-            final answers = entriesData[date]?['answers']
-                as Map<String, dynamic>?;
+            final day = entriesData[date];
             final parts = date.split('-');
             final dateLabel = '${parts[1]}/${parts[2]}';
 
@@ -339,16 +333,14 @@ class _RecordsTable extends StatelessWidget {
                       color: c.textPrimary,
                       fontSize: 12))),
               ..._fixedKeys.map((key) {
-                final val = answers?[key] as String?;
+                final val = day?.answerTextFor(key);
                 return DataCell(_TableCell(value: val));
               }),
             ];
 
-            final customCells = customQuestions
-                .asMap()
-                .entries
-                .map((e) {
-              final val = answers?['custom_${e.key}'] as String?;
+            final customCells = customQuestions.map((q) {
+              // 新スキーマでは custom 質問のキーは 'custom_<questionId>'
+              final val = day?.answerTextFor('custom_${q.id}');
               return DataCell(_TableCell(value: val));
             }).toList();
 

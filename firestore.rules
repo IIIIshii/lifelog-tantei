@@ -1,0 +1,76 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+    function isValidString(value, maxLen) {
+      return value is string && value.size() <= maxLen;
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+
+      allow create: if isOwner(uid)
+        && request.resource.data.providerId in ['anonymous', 'google.com']
+        && request.resource.data.schemaVersion is int
+        && request.resource.data.createdAt == request.time;
+
+      allow update: if isOwner(uid)
+        && request.resource.data.providerId in ['anonymous', 'google.com']
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.schemaVersion == resource.data.schemaVersion;
+
+      allow delete: if false;
+
+      match /settings/preferences {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /customQuestions/{questionId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && isValidString(request.resource.data.text, 200)
+          && request.resource.data.type in ['text', 'number', 'single_choice']
+          && request.resource.data.enabled is bool
+          && request.resource.data.order is number;
+        allow update: if isOwner(uid)
+          && isValidString(request.resource.data.text, 200)
+          && request.resource.data.type in ['text', 'number', 'single_choice']
+          && request.resource.data.enabled is bool
+          && request.resource.data.order is number;
+        allow delete: if isOwner(uid);
+      }
+
+      match /days/{date} {
+        function isValidDate() {
+          return date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+        }
+
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && isValidDate()
+          && (!('diary' in request.resource.data)
+              || request.resource.data.diary == null
+              || isValidString(request.resource.data.diary, 10000))
+          && (!('responses' in request.resource.data)
+              || request.resource.data.responses.size() <= 100);
+        allow delete: if isOwner(uid);
+
+        match /conversation/{messageId} {
+          allow read: if isOwner(uid);
+          allow create: if isOwner(uid)
+            && request.resource.data.role in ['ai', 'user']
+            && isValidString(request.resource.data.text, 5000)
+            && request.resource.data.order is int;
+          allow update, delete: if false;
+        }
+      }
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
+import '../models/day_entry.dart';
 import '../services/firestore_service.dart';
 import 'diary_list_page.dart';
 
@@ -46,7 +47,12 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
     if (text.isEmpty) return;
     setState(() => _isSaving = true);
     try {
-      await widget.firestore.saveDiary(widget.uid, widget.today, text);
+      // initialDiary が null = 新規入力（manual）、非null = AI生成後の編集（ai_then_edited）
+      final source = widget.initialDiary == null
+          ? DiarySource.manual
+          : DiarySource.aiThenEdited;
+      await widget.firestore
+          .saveDiaryText(widget.uid, widget.today, text, source);
       setState(() => _saved = true);
     } catch (e) {
       if (mounted) {
