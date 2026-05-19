@@ -13,7 +13,7 @@ class DiaryListPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final entriesRef = FirestoreService().entriesQuery(uid);
+    final daysRef = FirestoreService().daysQuery(uid);
     final c = context.colors;
 
     return Scaffold(
@@ -41,7 +41,7 @@ class DiaryListPage extends StatelessWidget {
       // ── Body ────────────────────────────────────────────────
       // Firestoreのリアルタイム更新をStreamBuilderで受け取って一覧を描画する
       body: StreamBuilder<QuerySnapshot>(
-        stream: entriesRef.snapshots(),
+        stream: daysRef.snapshots(),
         builder: (context, snapshot) {
           // 読み込み中: ゴールドのローディングインジケーター
           if (snapshot.connectionState == ConnectionState.waiting) {

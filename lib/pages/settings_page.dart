@@ -7,6 +7,7 @@ import '../core/theme/app_colors.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../core/theme/theme_controller.dart';
+import '../models/custom_question.dart';
 import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
@@ -23,6 +24,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   UserSettings _settings = UserSettings.defaults();
+  List<CustomQuestion> _customQuestions = []; // archivedAt==null のみ、order昇順
   String? _uid;
   bool _isLoading = true;
   bool _isSaving = false; // 保存中フラグ（AppBarにスピナーを表示するために使用）
@@ -46,14 +48,27 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
-  // FirestoreからUserSettingsを読み込む
+  // FirestoreからUserSettingsとcustomQuestionsを並行ロードする
   Future<void> _loadSettings() async {
     _uid = await _auth.signInAnonymously();
-    final settings = await _firestore.getUserSettings(_uid!);
+    final results = await Future.wait([
+      _firestore.getUserSettings(_uid!),
+      _firestore.getActiveCustomQuestions(_uid!),
+    ]);
     setState(() {
-      _settings = settings;
+      _settings = results[0] as UserSettings;
+      _customQuestions = results[1] as List<CustomQuestion>;
       _isLoading = false;
     });
+  }
+
+  // customQuestionsのみ再読み込みする（追加・削除後に呼ぶ）
+  Future<void> _reloadCustomQuestions() async {
+    if (_uid == null) return;
+    final list = await _firestore.getActiveCustomQuestions(_uid!);
+    if (mounted) {
+      setState(() => _customQuestions = list);
+    }
   }
 
   // 設定を更新してFirestoreに即時保存する（トグル操作のたびに呼ばれる）
@@ -97,14 +112,23 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // テキストフィールドの内容をカスタム質問リストに追加して保存する
-  void _addCustomQuestion() {
+  // テキストフィールドの内容をcustomQuestionsコレクションに追加する
+  // 既存リストの末尾に挿入するため order は現リスト+1.0
+  Future<void> _addCustomQuestion() async {
+    if (_uid == null) return;
     final text = _customQuestionController.text.trim();
     if (text.isEmpty) return;
     _customQuestionController.clear();
-    _save(_settings.copyWith(
-      customQuestions: [..._settings.customQuestions, text],
-    ));
+    final nextOrder = _customQuestions.isEmpty
+        ? 1.0
+        : _customQuestions.last.order + 1.0;
+    await _firestore.addCustomQuestion(
+      _uid!,
+      text: text,
+      type: QuestionType.text,
+      order: nextOrder,
+    );
+    await _reloadCustomQuestions();
   }
 
   // 全エントリをCSV形式に変換してシェアシートを開く
@@ -112,30 +136,33 @@ class _SettingsPageState extends State<SettingsPage> {
     if (_uid == null) return;
     setState(() => _isExporting = true);
     try {
-      final entries = await _firestore.getAllEntries(_uid!);
+      final days = await _firestore.getAllDays(_uid!);
 
-      // 全エントリに含まれるanswerキーを収集してCSVの列を決定する
-      final allAnswerKeys = <String>{};
-      for (final entry in entries) {
-        final answers = entry.value['answers'] as Map<String, dynamic>?;
-        if (answers != null) allAnswerKeys.addAll(answers.keys);
+      // 全 day を走査して questionKey → questionText を構築
+      // 同じキーで違う文言があれば走査順で後勝ち（archive 後の質問テキストも保持）
+      final keyToText = <String, String>{};
+      for (final day in days) {
+        for (final r in day.responses) {
+          keyToText[r.questionKey] = r.questionText;
+        }
       }
-      final answerKeys = allAnswerKeys.toList()..sort();
+      final sortedKeys = keyToText.keys.toList()..sort();
 
-      // ヘッダー行
+      // ヘッダー行（questionText を列名にしてCSVを読みやすくする）
       final rows = <List<String>>[
-        ['日付', '日記', ...answerKeys],
+        ['日付', '日記', ...sortedKeys.map((k) => keyToText[k] ?? k)],
       ];
 
       // データ行
-      for (final entry in entries) {
-        final date = entry.key;
-        final diary = (entry.value['diary'] as String?) ?? '';
-        final answers = (entry.value['answers'] as Map<String, dynamic>?) ?? {};
+      for (final day in days) {
+        final answers = <String, String>{};
+        for (final r in day.responses) {
+          if (r.answerText != null) answers[r.questionKey] = r.answerText!;
+        }
         rows.add([
-          date,
-          diary,
-          ...answerKeys.map((k) => (answers[k] as String?) ?? ''),
+          day.date,
+          day.diary ?? '',
+          ...sortedKeys.map((k) => answers[k] ?? ''),
         ]);
       }
 
@@ -178,11 +205,12 @@ class _SettingsPageState extends State<SettingsPage> {
     return value;
   }
 
-  // 指定インデックスのカスタム質問を削除して保存する
-  void _removeCustomQuestion(int index) {
-    final updated = List<String>.from(_settings.customQuestions)
-      ..removeAt(index);
-    _save(_settings.copyWith(customQuestions: updated));
+  // 指定IDのカスタム質問を論理削除する（archivedAtをセット）
+  // 過去日記からの questionRef 参照が壊れないように完全削除はしない
+  Future<void> _removeCustomQuestion(String questionId) async {
+    if (_uid == null) return;
+    await _firestore.archiveCustomQuestion(_uid!, questionId);
+    await _reloadCustomQuestions();
   }
 
   @override
@@ -301,34 +329,33 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsCard(
                   children: [
                     // 登録済みカスタム質問を一覧表示する
-                    ..._settings.customQuestions.asMap().entries.map((entry) {
+                    ..._customQuestions.asMap().entries.map((entry) {
+                      final q = entry.value;
                       return Column(
                         children: [
                           ListTile(
                             title: Text(
-                              entry.value,
+                              q.text,
                               style: TextStyle(
                                 fontSize: 14,
                                 color: c.textPrimary,
                               ),
                             ),
-                            // 削除ボタン
+                            // 削除ボタン（論理削除＝archive）
                             trailing: IconButton(
                               icon: Icon(Icons.delete_outline,
                                   color: c.textSecondary, size: 20),
-                              onPressed: () =>
-                                  _removeCustomQuestion(entry.key),
+                              onPressed: () => _removeCustomQuestion(q.id),
                             ),
                           ),
-                          if (entry.key <
-                              _settings.customQuestions.length - 1)
+                          if (entry.key < _customQuestions.length - 1)
                             Divider(height: 1, color: c.cardBorder),
                         ],
                       );
                     }),
 
                     // 既存質問がある場合は区切り線を入れる
-                    if (_settings.customQuestions.isNotEmpty)
+                    if (_customQuestions.isNotEmpty)
                       Divider(height: 1, color: c.cardBorder),
 
                     // 新しいカスタム質問を入力・追加するフィールド

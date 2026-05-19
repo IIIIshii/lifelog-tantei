@@ -1,8 +1,12 @@
 import 'dart:collection';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
+import '../models/custom_question.dart';
+import '../models/day_entry.dart';
+import '../models/response_entry.dart';
 import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
@@ -37,11 +41,24 @@ enum _Phase {
 // 1つの質問を表すデータクラス
 // choices: nullのときはテキスト入力式
 // key: answersマップへの保存キー。nullのとき（導入文など）は回答を記録しない
+// source: 質問の出所（app_fixed / app_event / app_recall / user_custom / ai_followup / addendum）
+// questionType: 回答タイプ（保存時 ResponseEntry.questionType に転写）
+// questionRef: source=userCustom のときの customQuestions/{id} 参照
 class _Question {
   final String text;
   final List<String>? choices;
   final String? key;
-  const _Question(this.text, {this.choices, this.key});
+  final ResponseSource source;
+  final QuestionType questionType;
+  final DocumentReference<Map<String, dynamic>>? questionRef;
+  const _Question(
+    this.text, {
+    this.choices,
+    this.key,
+    this.source = ResponseSource.appFixed,
+    this.questionType = QuestionType.text,
+    this.questionRef,
+  });
 }
 
 // 今日の日記を作成するページ。AIとの対話を通じて日記を生成する
@@ -68,6 +85,10 @@ class _DiaryPageState extends State<DiaryPage> {
   String? _pendingKey; // 直前のAI質問のキー（次のユーザー回答をanswersに紐づけるため）
   final Map<String, String> _answers = {}; // 質問キー → 回答テキストのマップ
   final Map<String, double> _numericAnswers = {}; // 質問キー → 数値回答のマップ
+  // 質問キー → 質問メタ情報（source/text/type/ref）のマップ
+  // 保存時に ResponseEntry を組み立てるための質問文スナップショット保持
+  // 同じキーが再度問われた場合は上書きされる（最新のスナップショットを採用）
+  final Map<String, _Question> _askedQuestions = {};
 
   final ScrollController _scrollController = ScrollController();
 
@@ -92,25 +113,35 @@ class _DiaryPageState extends State<DiaryPage> {
       'それはいつの話だ？',
       choices: ['朝', '昼', '夜', '仕事中', '学校', 'プライベート', 'その他(自由記述)'],
       key: 'event_when',
+      source: ResponseSource.appEvent,
+      questionType: QuestionType.singleChoice,
     ),
     _Question(
       'どこで起きた？',
       choices: ['自宅', '学校', '職場', 'その他(自由記述)'],
       key: 'event_where',
+      source: ResponseSource.appEvent,
+      questionType: QuestionType.singleChoice,
     ),
     _Question(
       '誰に関わる話だ？',
       choices: ['自分', 'その他(自由記述)'],
       key: 'event_who',
+      source: ResponseSource.appEvent,
+      questionType: QuestionType.singleChoice,
     ),
     _Question(
       '何があった？話してくれ。',
       key: 'event_what',
+      source: ResponseSource.appEvent,
+      questionType: QuestionType.text,
     ),
     _Question(
       'そのとき、どう感じた？',
       choices: ['嬉しかった', '面白かった', '悲しかった', '怒った', 'その他(自由記述)'],
       key: 'event_how',
+      source: ResponseSource.appEvent,
+      questionType: QuestionType.singleChoice,
     ),
   ];
 
@@ -136,7 +167,7 @@ class _DiaryPageState extends State<DiaryPage> {
       _uid = await _auth.signInAnonymously();
       _today = DateTime.now().toIso8601String().split('T')[0];
 
-      final existingDiary = await _firestore.getTodayDiary(_uid!, _today!);
+      final existingDiary = await _firestore.getDayDiary(_uid!, _today!);
       if (existingDiary != null) {
         _conversationOrder = await _firestore.getMessageCount(_uid!, _today!);
         const message = '今日の事件簿はすでに存在する。どうするつもりだ？';
@@ -150,8 +181,15 @@ class _DiaryPageState extends State<DiaryPage> {
         return;
       }
 
-      final settings = await _firestore.getUserSettings(_uid!);
-      _buildQueues(settings);
+      // settings と customQuestions を並行フェッチして質問キューを構築
+      final results = await Future.wait([
+        _firestore.getUserSettings(_uid!),
+        _firestore.getActiveCustomQuestions(_uid!),
+      ]);
+      _buildQueues(
+        results[0] as UserSettings,
+        results[1] as List<CustomQuestion>,
+      );
       await _askNext();
     } catch (e) {
       _showError('初期化エラー: $e');
@@ -181,8 +219,14 @@ class _DiaryPageState extends State<DiaryPage> {
     // 追記する → 質問フローを開始
     setState(() => _isLoading = true);
     try {
-      final settings = await _firestore.getUserSettings(_uid!);
-      _buildQueues(settings);
+      final results = await Future.wait([
+        _firestore.getUserSettings(_uid!),
+        _firestore.getActiveCustomQuestions(_uid!),
+      ]);
+      _buildQueues(
+        results[0] as UserSettings,
+        results[1] as List<CustomQuestion>,
+      );
       await _askNext();
     } catch (e) {
       _showError('初期化エラー: $e');
@@ -191,9 +235,14 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
-  // ユーザー設定を元に各質問キューを構築する
-  void _buildQueues(UserSettings settings) {
-    // ── カスタム質問キュー（sleep/food/exercise/study + ユーザー定義）──
+  // ユーザー設定とカスタム質問リストを元に各質問キューを構築する
+  // 各 _Question には source / questionType / questionRef を付与し、
+  // 保存時に ResponseEntry へ展開できるようにする
+  void _buildQueues(
+    UserSettings settings,
+    List<CustomQuestion> customQuestions,
+  ) {
+    // ── 固定質問キュー（sleep/food/exercise/study）──
     if (settings.recordSleep) {
       _customQueue.add(const _Question(
         '昨夜は何時間眠った？',
@@ -204,16 +253,25 @@ class _DiaryPageState extends State<DiaryPage> {
           '13時間〜', 'カスタム',
         ],
         key: 'sleep',
+        source: ResponseSource.appFixed,
+        questionType: QuestionType.singleChoice,
       ));
     }
     if (settings.recordFood) {
-      _customQueue.add(const _Question('今日、何を口にした？', key: 'food'));
+      _customQueue.add(const _Question(
+        '今日、何を口にした？',
+        key: 'food',
+        source: ResponseSource.appFixed,
+        questionType: QuestionType.text,
+      ));
     }
     if (settings.recordExercise) {
       _customQueue.add(const _Question(
         '身体を動かしたか？',
         choices: ['した', 'していない'],
         key: 'exercise',
+        source: ResponseSource.appFixed,
+        questionType: QuestionType.singleChoice,
       ));
     }
     if (settings.recordStudy) {
@@ -221,19 +279,47 @@ class _DiaryPageState extends State<DiaryPage> {
         '今日、頭を使う作業はしたか？',
         choices: ['した', 'していない'],
         key: 'study',
+        source: ResponseSource.appFixed,
+        questionType: QuestionType.singleChoice,
       ));
     }
-    for (var i = 0; i < settings.customQuestions.length; i++) {
-      _customQueue.add(_Question(settings.customQuestions[i], key: 'custom_$i'));
+
+    // ── ユーザー定義のカスタム質問 ──
+    // questionRef は customQuestions/{id} ドキュメント参照
+    // questionKey は 'custom_<questionId>' 形式（旧 custom_<index> から変更）
+    for (final cq in customQuestions) {
+      _customQueue.add(_Question(
+        cq.text,
+        choices: cq.choices,
+        key: 'custom_${cq.id}',
+        source: ResponseSource.userCustom,
+        questionType: cq.type,
+        questionRef: _firestore.customQuestionRef(_uid!, cq.id),
+      ));
     }
 
     // ── 思い出しアシストキュー ──
     _hasRecallAssist = settings.recallAssist;
     if (settings.recallAssist) {
       _recallQueue.addAll([
-        const _Question('午前中の動向を報告してくれ。', key: 'morning'),
-        const _Question('午後はどう動いた？', key: 'afternoon'),
-        const _Question('夜の動向は？', key: 'evening'),
+        const _Question(
+          '午前中の動向を報告してくれ。',
+          key: 'morning',
+          source: ResponseSource.appRecall,
+          questionType: QuestionType.text,
+        ),
+        const _Question(
+          '午後はどう動いた？',
+          key: 'afternoon',
+          source: ResponseSource.appRecall,
+          questionType: QuestionType.text,
+        ),
+        const _Question(
+          '夜の動向は？',
+          key: 'evening',
+          source: ResponseSource.appRecall,
+          questionType: QuestionType.text,
+        ),
       ]);
     }
 
@@ -263,7 +349,14 @@ class _DiaryPageState extends State<DiaryPage> {
         }
         if (_customQueue.isNotEmpty) {
           final q = _customQueue.removeFirst();
-          _postAiMessage(q.text, choices: q.choices, key: q.key);
+          _postAiMessage(
+            q.text,
+            choices: q.choices,
+            key: q.key,
+            source: q.source,
+            questionType: q.questionType,
+            questionRef: q.questionRef,
+          );
         } else {
           _phase = _Phase.customSaved;
           await _askNext();
@@ -294,7 +387,14 @@ class _DiaryPageState extends State<DiaryPage> {
         }
         if (_recallQueue.isNotEmpty) {
           final q = _recallQueue.removeFirst();
-          _postAiMessage(q.text, key: q.key);
+          _postAiMessage(
+            q.text,
+            choices: q.choices,
+            key: q.key,
+            source: q.source,
+            questionType: q.questionType,
+            questionRef: q.questionRef,
+          );
         } else {
           _phase = _Phase.recallSaved;
           await _askNext();
@@ -312,7 +412,14 @@ class _DiaryPageState extends State<DiaryPage> {
       case _Phase.event:
         if (_eventQueue.isNotEmpty) {
           final q = _eventQueue.removeFirst();
-          _postAiMessage(q.text, choices: q.choices, key: q.key);
+          _postAiMessage(
+            q.text,
+            choices: q.choices,
+            key: q.key,
+            source: q.source,
+            questionType: q.questionType,
+            questionRef: q.questionRef,
+          );
         } else {
           _phase = _Phase.aiFollowUp;
           await _askAiFollowUp();
@@ -334,12 +441,33 @@ class _DiaryPageState extends State<DiaryPage> {
   // Geminiを呼ばずにメッセージをAI発言としてリストとFirestoreに追加する
   // choices: 指定された場合は選択肢ボタンを表示
   // key: 次のユーザー回答をanswersマップに記録する際のキー
-  void _postAiMessage(String text, {List<String>? choices, String? key}) {
+  // source / questionType / questionRef: 保存時に ResponseEntry に転写するメタ情報
+  //   key が non-null の場合に _askedQuestions[key] にスナップショットを保存する
+  void _postAiMessage(
+    String text, {
+    List<String>? choices,
+    String? key,
+    ResponseSource source = ResponseSource.appFixed,
+    QuestionType questionType = QuestionType.text,
+    DocumentReference<Map<String, dynamic>>? questionRef,
+  }) {
     _firestore.saveMessage(_uid!, _today!, 'ai', text, _conversationOrder++);
     setState(() {
       _messages.add({'role': 'ai', 'text': text});
       _currentChoices = choices;
       _pendingKey = key;
+      if (key != null) {
+        // 質問文のスナップショットを残す。後でカスタム質問が編集/archiveされても
+        // 今回保存される responses[].questionText には元の文言が残る
+        _askedQuestions[key] = _Question(
+          text,
+          choices: choices,
+          key: key,
+          source: source,
+          questionType: questionType,
+          questionRef: questionRef,
+        );
+      }
     });
     _scrollToBottom();
   }
@@ -419,8 +547,13 @@ class _DiaryPageState extends State<DiaryPage> {
         await _askNext();
       case _Phase.addendum:
         if (text == 'はい(追記事項の入力へ)') {
-          // 自由記述の追記入力へ（回答をaddendum_textキーで記録）
-          _postAiMessage('言い残したことを話してくれ。', key: 'addendum');
+          // 自由記述の追記入力へ（回答を addendum キーで記録）
+          _postAiMessage(
+            '言い残したことを話してくれ。',
+            key: 'addendum',
+            source: ResponseSource.addendum,
+            questionType: QuestionType.text,
+          );
         } else if (text == 'いいえ(日記の生成へ)') {
           // 追記なしで日記生成へ
           _phase = _Phase.diaryView;
@@ -449,12 +582,13 @@ class _DiaryPageState extends State<DiaryPage> {
         await _askNext();
         return;
       }
-      await _firestore.saveMessage(
-          _uid!, _today!, 'ai', followUp, _conversationOrder++);
-      setState(() {
-        _messages.add({'role': 'ai', 'text': followUp});
-        _pendingKey = 'ai_followup';
-      });
+      // _postAiMessage で質問メタも _askedQuestions に登録される
+      _postAiMessage(
+        followUp,
+        key: 'ai_followup',
+        source: ResponseSource.aiFollowUp,
+        questionType: QuestionType.text,
+      );
     } catch (e) {
       _showError('AIエラー: $e');
     } finally {
@@ -497,9 +631,12 @@ class _DiaryPageState extends State<DiaryPage> {
           _currentChoices = null;
           _phase = _Phase.event;
         });
-        // event関連の回答をクリアしてキューを再構築
-        _answers.removeWhere((k, _) =>
-            k.startsWith('event_') || k == 'ai_followup' || k == 'addendum');
+        // event関連の回答とメタをクリアしてキューを再構築
+        bool isEventRelated(String k) =>
+            k.startsWith('event_') || k == 'ai_followup' || k == 'addendum';
+        _answers.removeWhere((k, _) => isEventRelated(k));
+        _numericAnswers.removeWhere((k, _) => isEventRelated(k));
+        _askedQuestions.removeWhere((k, _) => isEventRelated(k));
         _eventQueue.clear();
         for (final q in _eventQuestions) {
           _eventQueue.add(q);
@@ -532,6 +669,7 @@ class _DiaryPageState extends State<DiaryPage> {
   }
 
   // 会話履歴からGeminiに日記を生成させてFirestoreに保存する
+  // 保存は saveDay() で一括（responses[] と metrics は同時にコミットされる）
   Future<void> _generateDiary() async {
     setState(() {
       _phase = _Phase.diaryView;
@@ -547,11 +685,17 @@ class _DiaryPageState extends State<DiaryPage> {
               additionalContext: additionalContext)
           : await _gemini.generateDiary(eventMessages,
               additionalContext: additionalContext);
-      await Future.wait([
-        _firestore.saveDiary(_uid!, _today!, diary),
-        _firestore.saveAnswers(_uid!, _today!, _answers,
-            numericAnswers: _numericAnswers),
-      ]);
+
+      // _answers / _numericAnswers / _askedQuestions から ResponseEntry を組み立て、
+      // DayEntry として一括保存。metrics は saveDay 内で responses から自動生成される
+      final day = DayEntry(
+        date: _today!,
+        diary: diary,
+        diarySource: DiarySource.ai,
+        responses: _buildResponses(),
+      );
+      await _firestore.saveDay(_uid!, day);
+
       _postAiMessage('事件簿を作成した。確認してくれ。');
       setState(() {
         _diary = diary;
@@ -561,6 +705,49 @@ class _DiaryPageState extends State<DiaryPage> {
       _showError('日記生成エラー: $e');
     } finally {
       setState(() => _isLoading = false);
+    }
+  }
+
+  // _answers / _numericAnswers / _askedQuestions を join して ResponseEntry のリストを構築
+  // - 各回答の source は _askedQuestions の質問メタから取得
+  // - includedInDiary は source と _include*InDiary フラグから決定
+  // - order は _answers の挿入順（LinkedHashMap）に合わせる
+  List<ResponseEntry> _buildResponses() {
+    final responses = <ResponseEntry>[];
+    var order = 0;
+    for (final entry in _answers.entries) {
+      final meta = _askedQuestions[entry.key];
+      if (meta == null) continue; // メタ未登録の回答は保存対象外（防御的）
+      responses.add(ResponseEntry(
+        source: meta.source,
+        questionKey: entry.key,
+        questionRef: meta.questionRef,
+        questionText: meta.text,
+        questionType: meta.questionType,
+        answerText: entry.value,
+        answerNumber: _numericAnswers[entry.key],
+        includedInDiary: _isIncludedInDiary(meta.source),
+        order: order++,
+      ));
+    }
+    return responses;
+  }
+
+  // 回答を AI 日記生成に含めるかを source から決定する
+  // appEvent / aiFollowUp / addendum は常に含める（出来事の本筋なので）
+  // appFixed / userCustom は _includeCustomInDiary
+  // appRecall は _includeRecallInDiary
+  bool _isIncludedInDiary(ResponseSource source) {
+    switch (source) {
+      case ResponseSource.appFixed:
+      case ResponseSource.userCustom:
+        return _includeCustomInDiary;
+      case ResponseSource.appRecall:
+        return _includeRecallInDiary;
+      case ResponseSource.appEvent:
+      case ResponseSource.aiFollowUp:
+      case ResponseSource.addendum:
+        return true;
     }
   }
 
