@@ -14,6 +14,8 @@ void main() {
       expect(GeminiService.isDoneResponse('もう少し詳しく教えてください。'), isFalse);
       expect(GeminiService.isDoneResponse(''), isFalse);
       expect(GeminiService.isDoneResponse('ABANDONED'), isFalse);
+      expect(GeminiService.isDoneResponse('doneTODO'), isFalse);
+      expect(GeminiService.isDoneResponse('NOTDONE'), isFalse);
     });
   });
 }
