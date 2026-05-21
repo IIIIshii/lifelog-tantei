@@ -41,6 +41,8 @@ class GeminiService {
     return trimmedText.isNotEmpty ? trimmedText : 'もう少し詳しく教えてください。';
   }
 
+  /// AI応答が対話終了を示すかどうかを判定する。
+  /// 大文字小文字・前後の空白・句読点の揺れを許容し、`DONE` を含む場合に終了とみなす。
   static bool isDoneResponse(String text) {
     return text.trim().toUpperCase().contains('DONE');
   }
