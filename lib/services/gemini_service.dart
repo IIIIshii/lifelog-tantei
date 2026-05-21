@@ -42,7 +42,8 @@ class GeminiService {
   }
 
   /// AI応答が対話終了を示すかどうかを判定する。
-  /// 大文字小文字・前後の空白・句読点の揺れを許容し、`DONE` が独立トークンとして現れる場合に終了とみなす。
+  /// 大文字小文字・前後の空白・句読点の揺れを許容し、`DONE` を終了シグナルとして検出する。
+  /// `ABANDONED` のような英字単語内の部分一致は除外しつつ、日本語や記号に隣接する `DONE` は有効とする。
   static bool isDoneResponse(String text) {
     final normalized = text.trim().toUpperCase();
     return RegExp(r'(^|[^A-Z0-9_])DONE([^A-Z0-9_]|$)').hasMatch(normalized);
