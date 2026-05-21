@@ -5,6 +5,10 @@ import '../prompts/diary_prompts.dart';
 // Gemini APIとのやり取りを担当するサービスクラス。
 // インタビュー用と日記生成用でモデルを分け、それぞれに専用のシステム指示をセットする。
 class GeminiService {
+  // 前後が英数字/アンダースコア以外、または文頭/文末にある DONE を終了シグナルとして扱う。
+  static final RegExp _donePattern =
+      RegExp(r'(^|[^A-Z0-9_])DONE([^A-Z0-9_]|$)');
+
   // インタビュアーキャラクターとしてのシステム指示を持つモデル
   final GenerativeModel _interviewModel;
   // 日記生成ルールのシステム指示を持つモデル
@@ -46,7 +50,7 @@ class GeminiService {
   /// `ABANDONED` のような英字単語内の部分一致は除外しつつ、日本語や記号に隣接する `DONE` は有効とする。
   static bool isDoneResponse(String text) {
     final normalized = text.trim().toUpperCase();
-    return RegExp(r'(^|[^A-Z0-9_])DONE([^A-Z0-9_]|$)').hasMatch(normalized);
+    return _donePattern.hasMatch(normalized);
   }
 
   // 会話履歴から日記テキストをGeminiに生成させる。
