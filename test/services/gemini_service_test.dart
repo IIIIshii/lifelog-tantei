@@ -13,6 +13,7 @@ void main() {
     test('DONEを含まない文字列は終了判定しない', () {
       expect(GeminiService.isDoneResponse('もう少し詳しく教えてください。'), isFalse);
       expect(GeminiService.isDoneResponse(''), isFalse);
+      expect(GeminiService.isDoneResponse('ABANDONED'), isFalse);
     });
   });
 }
