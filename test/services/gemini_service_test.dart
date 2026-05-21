@@ -8,6 +8,7 @@ void main() {
       expect(GeminiService.isDoneResponse('DONE。'), isTrue);
       expect(GeminiService.isDoneResponse('done'), isTrue);
       expect(GeminiService.isDoneResponse('  DONE\n'), isTrue);
+      expect(GeminiService.isDoneResponse('では、DONE。次へ進みます。'), isTrue);
     });
 
     test('DONEを含まない文字列は終了判定しない', () {
