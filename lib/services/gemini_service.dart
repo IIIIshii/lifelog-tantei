@@ -34,9 +34,15 @@ class GeminiService {
     final response = await _interviewModel.generateContent([
       Content.text(prompt),
     ]);
-    final text = response.text?.trim() ?? '';
-    if (text == 'DONE') return null;
-    return text.isNotEmpty ? text : 'もう少し詳しく教えてください。';
+    final text = response.text ?? '';
+    if (isDoneResponse(text)) return null;
+
+    final trimmedText = text.trim();
+    return trimmedText.isNotEmpty ? trimmedText : 'もう少し詳しく教えてください。';
+  }
+
+  static bool isDoneResponse(String text) {
+    return text.trim().toUpperCase().contains('DONE');
   }
 
   // 会話履歴から日記テキストをGeminiに生成させる。
