@@ -127,7 +127,7 @@ if (text.trim().toUpperCase().contains('DONE')) return null;
 | `final` | 一度代入したら変更できない変数 |
 | `const` | コンパイル時に値が確定する定数 |
 | `dynamic` | どんな型でもOKな型 |
-| `_変数名` | privateの宣言。ファイル外から触れない |
+| `_変数名` | privateの宣言。ライブラリ外（通常はファイル外）から触れない |
 
 ### null安全
 
