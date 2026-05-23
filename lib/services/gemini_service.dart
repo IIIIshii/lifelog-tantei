@@ -10,12 +10,15 @@ class GeminiService {
   // 日記生成ルールのシステム指示を持つモデル
   final GenerativeModel _diaryModel;
 
-  GeminiService(String apiKey)
-      : _interviewModel = GenerativeModel(
+  final String _role;
+
+  GeminiService(String apiKey, String role)
+      : _role = role,
+        _interviewModel = GenerativeModel(
           model: 'gemini-2.5-flash',
           apiKey: apiKey,
           systemInstruction:
-              Content.system(AiInstructions.interviewerRole),
+              Content.system(AiInstructions.interviewerRoles[role] ?? AiInstructions.interviewerRoles['hardboiled']!),
         ),
         _diaryModel = GenerativeModel(
           model: 'gemini-2.5-flash',
@@ -30,7 +33,7 @@ class GeminiService {
   Future<String?> generateFollowUp(
       List<Map<String, String>> messages) async {
     final history = _buildHistory(messages);
-    final prompt = '${AiInstructions.followUpHint}\n\n以下が依頼人の証言です：\n$history';
+    final prompt = '${AiInstructions.followUpHint(_role)}\n\n以下が依頼人の証言です：\n$history';
     final response = await _interviewModel.generateContent([
       Content.text(prompt),
     ]);

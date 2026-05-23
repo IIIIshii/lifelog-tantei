@@ -219,6 +219,12 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final roles = [
+    ('hardboiled', 'ハードボイルド探偵'),
+    ('novice', '新卒探偵'),
+    ('alien', 'エイリアン'),
+    ('psychologist', '心理学者'),
+];
     return Scaffold(
       backgroundColor: c.background,
 
@@ -271,6 +277,29 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 8),
                 _AccountCard(onLogout: _confirmLogout),
                 const SizedBox(height: 28),
+
+
+              // ── セクション0: 探偵キャラクター選択 ──────────────────────
+              const _SectionHeader(
+                title: '◆ 探偵キャラクター',
+                subtitle: '尋問する探偵を選択',
+              ),
+              const SizedBox(height: 8),
+              _SettingsCard(
+              children: [
+                for (var i = 0; i < roles.length; i++) ...[  // ← ...[ が必要
+                  RadioListTile<String>(
+                    title: Text(roles[i].$2),
+                    value: roles[i].$1,
+                    groupValue: _settings.selectedRole,
+                    onChanged: (v) => _save(_settings.copyWith(selectedRole: v)),
+                  ),  // ← カンマが必要
+                  if (i < roles.length - 1)
+                    Divider(height: 1, color: c.cardBorder),
+                ],
+              ],
+            ),
+              const SizedBox(height: 28),
 
                 // ── セクション1: 捜査項目 ──────────────────────
                 const _SectionHeader(
