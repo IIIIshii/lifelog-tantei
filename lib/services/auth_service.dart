@@ -1,10 +1,62 @@
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
-// Firebase匿名認証を担当するサービスクラス
+// 認証ハブ：Google サインインと匿名（ゲスト）サインインを一元管理する。
+// AuthGate からは authStateChanges を購読し、ログイン状態を起動フローに反映させる。
+//
+// GoogleSignIn 7.x は `initialize()` を一度だけ呼ぶ必要があり、`authenticate()` で
+// アカウント取得 → ID トークンを GoogleAuthProvider に渡して FirebaseAuth に通す
+// という流れになっている。古い `GoogleSignIn().signIn()` API は使えない。
 class AuthService {
-  // 匿名サインインを行い、ユーザーのUIDを返す
-  Future<String?> signInAnonymously() async {
-    final credential = await FirebaseAuth.instance.signInAnonymously();
-    return credential.user?.uid;
+  AuthService._();
+  static final AuthService instance = AuthService._();
+
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  bool _googleInitialized = false;
+
+  // GoogleSignIn の初期化は一度きり。Web は clientId、ネイティブは serverClientId に
+  // Firebase の "Web client ID" を渡すと Firebase Auth が受け取れる ID トークンが得られる。
+  // .env に GOOGLE_WEB_CLIENT_ID が無ければ null で渡す（プラットフォーム既定の動作）。
+  Future<void> _ensureGoogleInitialized() async {
+    if (_googleInitialized) return;
+    final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'];
+    await GoogleSignIn.instance.initialize(
+      clientId: kIsWeb ? webClientId : null,
+      serverClientId: !kIsWeb ? webClientId : null,
+    );
+    _googleInitialized = true;
+  }
+
+  Stream<User?> authStateChanges() => _auth.authStateChanges();
+  User? get currentUser => _auth.currentUser;
+
+  Future<User?> signInWithGoogle() async {
+    await _ensureGoogleInitialized();
+    final account = await GoogleSignIn.instance.authenticate();
+    final auth = account.authentication;
+    final credential = GoogleAuthProvider.credential(idToken: auth.idToken);
+    final userCred = await _auth.signInWithCredential(credential);
+    return userCred.user;
+  }
+
+  Future<User?> signInAsGuest() async {
+    final userCred = await _auth.signInAnonymously();
+    return userCred.user;
+  }
+
+  // disconnect は次回ログイン時に再度アカウント選択ダイアログを出すために使う。
+  // 一度も Google にログインしていない場合は例外になり得るため握り潰す。
+  Future<void> signOut() async {
+    if (_googleInitialized) {
+      try {
+        await GoogleSignIn.instance.disconnect();
+      } catch (_) {
+        // 未認可・既切断などは無視
+      }
+    }
+    await _auth.signOut();
   }
 }

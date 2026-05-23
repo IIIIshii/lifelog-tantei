@@ -1,38 +1,20 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
-import '../services/auth_service.dart';
 import 'diary_page.dart';
 import 'analytics_page.dart';
 import 'diary_list_page.dart';
 import 'settings_page.dart';
 
-// アプリのホーム画面。4つのメニューカードを表示する
-class HomePage extends StatefulWidget {
+// アプリのホーム画面。4つのメニューカードを表示する。
+// AuthGate により認証済みでのみ表示されるため uid は非 null を前提とする。
+class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
-}
-
-class _HomePageState extends State<HomePage> {
-  String? _uid;
-  final AuthService _auth = AuthService();
-
-  @override
-  void initState() {
-    super.initState();
-    _initUid();
-  }
-
-  // 匿名サインインしてUIDを取得する。UID取得前はメニューボタンを無効化する
-  Future<void> _initUid() async {
-    final uid = await _auth.signInAnonymously();
-    setState(() => _uid = uid);
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
     final c = context.colors;
     return Scaffold(
       backgroundColor: c.background,
@@ -76,13 +58,10 @@ class _HomePageState extends State<HomePage> {
               icon: Icons.search,
               title: '新規事件を開く',
               subtitle: '（日記をつける）',
-              onTap: _uid == null
-                  ? null
-                  : () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const DiaryPage()),
-                      ),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DiaryPage()),
+              ),
             ),
             const SizedBox(height: 16),
             _CaseFileCard(
@@ -90,13 +69,10 @@ class _HomePageState extends State<HomePage> {
               icon: Icons.folder_open,
               title: '事件簿アーカイブ',
               subtitle: '（過去の日記を見る）',
-              onTap: _uid == null
-                  ? null
-                  : () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => DiaryListPage(uid: _uid!)),
-                      ),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => DiaryListPage(uid: uid)),
+              ),
             ),
             const SizedBox(height: 16),
             _CaseFileCard(
