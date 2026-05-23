@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -29,7 +30,6 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _isExporting = false;
   bool _isSeeding = false;
 
-  final AuthService _auth = AuthService();
   final FirestoreService _firestore = FirestoreService();
   final TextEditingController _customQuestionController =
       TextEditingController();
@@ -48,12 +48,43 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // FirestoreからUserSettingsを読み込む
   Future<void> _loadSettings() async {
-    _uid = await _auth.signInAnonymously();
+    _uid = FirebaseAuth.instance.currentUser!.uid;
     final settings = await _firestore.getUserSettings(_uid!);
     setState(() {
       _settings = settings;
       _isLoading = false;
     });
+  }
+
+  // ログアウト確認ダイアログ。ゲストの場合はデータ喪失を強めに警告する。
+  // 成功時の遷移は AuthGate が自動で行うため、ここでは Navigator を触らない。
+  Future<void> _confirmLogout() async {
+    final user = FirebaseAuth.instance.currentUser;
+    final isGuest = user?.isAnonymous ?? false;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('捜査を中断するか？'),
+        content: Text(
+          isGuest
+              ? 'ゲストモードでログアウトすると、この端末の記録は再アクセスできなくなる。本当にいいか？'
+              : 'ログアウトすると次回はもう一度ログインが必要だ。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('ログアウト'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await AuthService.instance.signOut();
+    }
   }
 
   // 設定を更新してFirestoreに即時保存する（トグル操作のたびに呼ばれる）
@@ -232,6 +263,15 @@ class _SettingsPageState extends State<SettingsPage> {
           : ListView(
               padding: const EdgeInsets.all(20),
               children: [
+                // ── セクション: アカウント ──────────────────────
+                const _SectionHeader(
+                  title: '◆ アカウント',
+                  subtitle: '現在のログイン情報',
+                ),
+                const SizedBox(height: 8),
+                _AccountCard(onLogout: _confirmLogout),
+                const SizedBox(height: 28),
+
                 // ── セクション1: 捜査項目 ──────────────────────
                 const _SectionHeader(
                   title: '◆ 捜査項目の選択',
@@ -768,6 +808,72 @@ class _ColorDot extends StatelessWidget {
         shape: BoxShape.circle,
         border: Border.all(color: border, width: 1),
       ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// アカウントセクションのカード
+//
+// 現在ログイン中のユーザー（Google か 匿名）を表示し、ログアウト導線を提供する。
+// 匿名ユーザーには「端末固有のデータ」である旨を警告として併記する。
+// ──────────────────────────────────────────────────────────────
+class _AccountCard extends StatelessWidget {
+  final VoidCallback onLogout;
+
+  const _AccountCard({required this.onLogout});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final user = FirebaseAuth.instance.currentUser;
+    final isGuest = user?.isAnonymous ?? true;
+    final displayName = isGuest
+        ? 'ゲスト'
+        : (user?.displayName?.isNotEmpty == true
+            ? user!.displayName!
+            : '名前未設定');
+    final subtitle = isGuest
+        ? '※ 端末固有のデータです。他端末からは参照できません'
+        : (user?.email ?? '');
+
+    return _SettingsCard(
+      children: [
+        ListTile(
+          leading: Icon(
+            isGuest ? Icons.person_outline : Icons.account_circle,
+            color: c.gold,
+          ),
+          title: Text(
+            displayName,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: c.textPrimary,
+            ),
+          ),
+          subtitle: subtitle.isEmpty
+              ? null
+              : Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 12, color: c.textSecondary),
+                ),
+        ),
+        Divider(height: 1, color: c.cardBorder),
+        ListTile(
+          leading: Icon(Icons.logout, color: c.textSecondary),
+          title: Text(
+            'ログアウト',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: c.textPrimary,
+            ),
+          ),
+          trailing: Icon(Icons.chevron_right, color: c.textSecondary),
+          onTap: onLogout,
+        ),
+      ],
     );
   }
 }

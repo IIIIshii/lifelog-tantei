@@ -1,10 +1,10 @@
 import 'dart:collection';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/user_settings.dart';
-import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
 import '../widgets/message_bubble.dart';
@@ -72,7 +72,6 @@ class _DiaryPageState extends State<DiaryPage> {
   final ScrollController _scrollController = ScrollController();
 
   late final GeminiService _gemini;
-  final AuthService _auth = AuthService();
   final FirestoreService _firestore = FirestoreService();
 
   _Phase _phase = _Phase.custom;
@@ -133,7 +132,7 @@ class _DiaryPageState extends State<DiaryPage> {
   Future<void> _initSession() async {
     setState(() => _isLoading = true);
     try {
-      _uid = await _auth.signInAnonymously();
+      _uid = FirebaseAuth.instance.currentUser!.uid;
       _today = DateTime.now().toIso8601String().split('T')[0];
 
       final existingDiary = await _firestore.getTodayDiary(_uid!, _today!);

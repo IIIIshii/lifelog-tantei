@@ -1,9 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/user_settings.dart';
-import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 
 // 証拠分析室：活動記録をグラフ・表で表示するページ
@@ -15,7 +15,6 @@ class AnalyticsPage extends StatefulWidget {
 }
 
 class _AnalyticsPageState extends State<AnalyticsPage> {
-  final AuthService _auth = AuthService();
   final FirestoreService _firestore = FirestoreService();
 
   bool _isLoading = true;
@@ -35,11 +34,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   Future<void> _loadData() async {
     try {
-      final uid = await _auth.signInAnonymously();
-      if (uid == null) {
-        setState(() => _isLoading = false);
-        return;
-      }
+      final uid = FirebaseAuth.instance.currentUser!.uid;
 
       // 並行フェッチ
       final entriesFuture = _firestore.getRecentEntries(uid, _days);

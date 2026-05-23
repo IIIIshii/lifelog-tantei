@@ -3,7 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
-import 'pages/home_page.dart';
+import 'pages/auth_gate.dart';
 import 'services/notification_service.dart';
 
 // アプリのエントリーポイント。dotenv→Firebase→テーマロードの順で初期化する
@@ -32,7 +32,7 @@ class MyApp extends StatelessWidget {
         return MaterialApp(
           title: 'ライフログ探偵',
           theme: buildTheme(themeName),
-          home: const HomePage(),
+          home: const AuthGate(),
         );
       },
     );
