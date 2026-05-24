@@ -10,6 +10,8 @@ class GeminiService {
   final GenerativeModel _interviewModel;
   // 日記生成ルールのシステム指示を持つモデル
   final GenerativeModel _diaryModel;
+  // 過去エントリ群を読み返して所見を出すモデル
+  final GenerativeModel _analysisModel;
 
   GeminiService(String apiKey)
       : _interviewModel = GenerativeModel(
@@ -40,6 +42,12 @@ class GeminiService {
           apiKey: apiKey,
           systemInstruction:
               Content.system(AiInstructions.diaryWriterRole),
+        ),
+        _analysisModel = GenerativeModel(
+          model: 'gemini-2.5-flash',
+          apiKey: apiKey,
+          systemInstruction:
+              Content.system(AiInstructions.detectiveAnalystRole),
         );
 
   // 会話履歴を渡して深掘り質問をGeminiに生成させる。
@@ -99,6 +107,17 @@ class GeminiService {
       Content.text(prompt),
     ]);
     return response.text?.trim() ?? '日記を生成できませんでした。';
+  }
+
+  // 直近のエントリ群（日付→データ）から所見テキストをGeminiに生成させる。
+  // 呼び出し側は FirestoreService.getRecentEntries の戻り値をそのまま渡せる。
+  Future<String> generateAnalysis(
+      List<MapEntry<String, Map<String, dynamic>>> entries) async {
+    final prompt = DiaryPrompts.buildAnalysisPrompt(entries);
+    final response = await _analysisModel.generateContent([
+      Content.text(prompt),
+    ]);
+    return response.text?.trim() ?? '所見を生成できませんでした。';
   }
 
   // メッセージリストを「探偵: ...」「依頼人: ...」形式の文字列に変換する
