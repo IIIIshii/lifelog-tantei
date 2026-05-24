@@ -72,6 +72,7 @@ class _DiaryPageState extends State<DiaryPage> {
   final ScrollController _scrollController = ScrollController();
 
   late final GeminiService _gemini;
+  late final String _apiKey;
   final FirestoreService _firestore = FirestoreService();
 
   _Phase _phase = _Phase.custom;
@@ -118,8 +119,7 @@ class _DiaryPageState extends State<DiaryPage> {
   @override
   void initState() {
     super.initState();
-    final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
-    _gemini = GeminiService(apiKey);
+    _apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
     _initSession();
   }
 
@@ -152,6 +152,7 @@ class _DiaryPageState extends State<DiaryPage> {
       }
 
       final settings = await _firestore.getUserSettings(_uid!);
+      _gemini = GeminiService(_apiKey, settings.selectedRole); // ← ここに追加
       _buildQueues(settings);
       await _askNext();
     } catch (e) {

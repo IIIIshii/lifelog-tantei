@@ -10,6 +10,7 @@ class UserSettings {
   final bool notificationEnabled; // 毎日リマインダー通知を送るか
   final int notificationHour; // 通知時刻：時（0–23）
   final int notificationMinute; // 通知時刻：分（0–59）
+  final String selectedRole; // 選択されたロール
 
   const UserSettings({
     this.recordEvent = true,
@@ -22,6 +23,7 @@ class UserSettings {
     this.notificationEnabled = false,
     this.notificationHour = 21,
     this.notificationMinute = 0,
+    this.selectedRole = 'hardboiled',
   });
 
   // デフォルト設定を返すファクトリ
@@ -41,6 +43,7 @@ class UserSettings {
       notificationEnabled: map['notificationEnabled'] as bool? ?? false,
       notificationHour: map['notificationHour'] as int? ?? 21,
       notificationMinute: map['notificationMinute'] as int? ?? 0,
+      selectedRole: map['selectedRole'] as String? ?? 'hardboiled',
     );
   }
 
@@ -57,6 +60,7 @@ class UserSettings {
       'notificationEnabled': notificationEnabled,
       'notificationHour': notificationHour,
       'notificationMinute': notificationMinute,
+      'selectedRole': selectedRole,
     };
   }
 
@@ -72,6 +76,7 @@ class UserSettings {
     bool? notificationEnabled,
     int? notificationHour,
     int? notificationMinute,
+    String? selectedRole,
   }) {
     return UserSettings(
       recordEvent: recordEvent ?? this.recordEvent,
@@ -84,6 +89,7 @@ class UserSettings {
       notificationEnabled: notificationEnabled ?? this.notificationEnabled,
       notificationHour: notificationHour ?? this.notificationHour,
       notificationMinute: notificationMinute ?? this.notificationMinute,
+      selectedRole: selectedRole ?? this.selectedRole,
     );
   }
 }

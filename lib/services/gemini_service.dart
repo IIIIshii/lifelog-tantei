@@ -13,12 +13,15 @@ class GeminiService {
   // 過去エントリ群を読み返して所見を出すモデル
   final GenerativeModel _analysisModel;
 
-  GeminiService(String apiKey)
-      : _interviewModel = GenerativeModel(
+  final String _role;
+
+  GeminiService(String apiKey, String role)
+      : _role = role,
+        _interviewModel = GenerativeModel(
           model: 'gemini-2.5-flash',
           apiKey: apiKey,
           systemInstruction:
-              Content.system(AiInstructions.interviewerRole),
+              Content.system(AiInstructions.interviewerRoles[role] ?? AiInstructions.interviewerRoles['hardboiled']!),
           // 構造化出力: {sufficient: bool, question: string} を強制し、
           // 「DONE」文字列マッチによる脆い終了判定を廃止する
           generationConfig: GenerationConfig(
@@ -57,7 +60,7 @@ class GeminiService {
   Future<({bool sufficient, String question})> generateFollowUp(
       List<Map<String, String>> messages) async {
     final history = _buildHistory(messages);
-    final prompt = '${AiInstructions.followUpHint}\n\n以下が依頼人の証言です：\n$history';
+    final prompt = '${AiInstructions.followUpHint(_role)}\n\n以下が依頼人の証言です：\n$history';
     final response = await _interviewModel.generateContent([
       Content.text(prompt),
     ]);
