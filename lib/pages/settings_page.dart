@@ -285,20 +285,24 @@ class _SettingsPageState extends State<SettingsPage> {
                 subtitle: '尋問する探偵を選択',
               ),
               const SizedBox(height: 8),
-              _SettingsCard(
-              children: [
-                for (var i = 0; i < roles.length; i++) ...[  // ← ...[ が必要
-                  RadioListTile<String>(
-                    title: Text(roles[i].$2),
-                    value: roles[i].$1,
-                    groupValue: _settings.selectedRole,
-                    onChanged: (v) => _save(_settings.copyWith(selectedRole: v)),
-                  ),  // ← カンマが必要
-                  if (i < roles.length - 1)
-                    Divider(height: 1, color: c.cardBorder),
-                ],
-              ],
-            ),
+              RadioGroup<String>(
+                groupValue: _settings.selectedRole,
+                onChanged: (v) {
+                  if (v != null) _save(_settings.copyWith(selectedRole: v));
+                },
+                child: _SettingsCard(
+                  children: [
+                    for (var i = 0; i < roles.length; i++) ...[
+                      RadioListTile<String>(
+                        title: Text(roles[i].$2),
+                        value: roles[i].$1,
+                      ),
+                      if (i < roles.length - 1)
+                        Divider(height: 1, color: c.cardBorder),
+                    ],
+                  ],
+                ),
+              ),
               const SizedBox(height: 28),
 
                 // ── セクション1: 捜査項目 ──────────────────────

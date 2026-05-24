@@ -19,8 +19,7 @@ class AnalyticsPage extends StatefulWidget {
 
 class _AnalyticsPageState extends State<AnalyticsPage> {
   final FirestoreService _firestore = FirestoreService();
-  late final GeminiService _gemini =
-      GeminiService(dotenv.env['GEMINI_API_KEY'] ?? '');
+  GeminiService? _gemini;
 
   bool _isLoading = true;
   bool _isGeneratingAnalysis = false;
@@ -65,6 +64,11 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
       final summary = _AnalyticsSummary.from(entries, _dateRange);
 
+      _gemini = GeminiService(
+        dotenv.env['GEMINI_API_KEY'] ?? '',
+        settings.selectedRole,
+      );
+
       setState(() {
         _sleepData.addAll(sleepData);
         _entriesData.addAll(entriesData);
@@ -90,13 +94,20 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       );
       return;
     }
+    final gemini = _gemini;
+    if (gemini == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('初期化が完了していない')),
+      );
+      return;
+    }
     setState(() => _isGeneratingAnalysis = true);
     try {
       final uid = FirebaseAuth.instance.currentUser!.uid;
       final entries = _entriesData.entries
           .map((e) => MapEntry(e.key, e.value))
           .toList();
-      final text = await _gemini.generateAnalysis(entries);
+      final text = await gemini.generateAnalysis(entries);
       await _firestore.saveAnalysis(uid, text);
       if (!mounted) return;
       setState(() {

@@ -49,6 +49,7 @@ class AiInstructions {
       '- 証言が十分に語られていると判断した場合: {"sufficient": true, "question": ""}\n'
       '- まだ深掘りすべきと判断した場合: {"sufficient": false, "question": "次の質問文"}\n'
       'question 以外の余計な文章や前置きは出力しないでください。';
+  }
 
   // ── 日記生成モデルのシステム指示 ─────────────────────────────
   // 日記生成専用 GenerativeModel の systemInstruction として事前にセットする。
