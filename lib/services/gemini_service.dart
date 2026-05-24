@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../prompts/ai_instructions.dart';
 import '../prompts/diary_prompts.dart';
@@ -16,6 +17,23 @@ class GeminiService {
           apiKey: apiKey,
           systemInstruction:
               Content.system(AiInstructions.interviewerRole),
+          // 構造化出力: {sufficient: bool, question: string} を強制し、
+          // 「DONE」文字列マッチによる脆い終了判定を廃止する
+          generationConfig: GenerationConfig(
+            responseMimeType: 'application/json',
+            responseSchema: Schema.object(
+              properties: {
+                'sufficient': Schema.boolean(
+                  description: '証言が十分に語られているかどうか',
+                ),
+                'question': Schema.string(
+                  description:
+                      'sufficient が false の場合の深掘り質問。true の場合は空文字でよい',
+                ),
+              },
+              requiredProperties: ['sufficient', 'question'],
+            ),
+          ),
         ),
         _diaryModel = GenerativeModel(
           model: 'gemini-2.5-flash',
@@ -26,8 +44,9 @@ class GeminiService {
 
   // 会話履歴を渡して深掘り質問をGeminiに生成させる。
   // followUpHint を隠し指示として会話履歴に付加し、UIには表示しない。
-  // Gemini が「DONE」を返した場合は null を返す（呼び出し側でスキップ処理をする）。
-  Future<String?> generateFollowUp(
+  // 戻り値の sufficient が true の場合、これ以上の深掘りは不要（呼び出し側で打ち切る）。
+  // JSONパースに失敗した場合は安全側に倒し、sufficient:true として扱う。
+  Future<({bool sufficient, String question})> generateFollowUp(
       List<Map<String, String>> messages) async {
     final history = _buildHistory(messages);
     final prompt = '${AiInstructions.followUpHint}\n\n以下が依頼人の証言です：\n$history';
@@ -35,8 +54,23 @@ class GeminiService {
       Content.text(prompt),
     ]);
     final text = response.text?.trim() ?? '';
-    if (text == 'DONE') return null;
-    return text.isNotEmpty ? text : 'もう少し詳しく教えてください。';
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map<String, dynamic>) {
+        final sufficient = decoded['sufficient'] == true;
+        final question = (decoded['question'] as String?)?.trim() ?? '';
+        if (sufficient) {
+          return (sufficient: true, question: '');
+        }
+        return (
+          sufficient: false,
+          question: question.isNotEmpty ? question : 'もう少し詳しく教えてください。',
+        );
+      }
+    } catch (_) {
+      // パース失敗時はフォローアップを諦めて先に進める方が UX が良い
+    }
+    return (sufficient: true, question: '');
   }
 
   // 会話履歴から日記テキストをGeminiに生成させる。
