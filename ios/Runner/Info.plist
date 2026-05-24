@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>音声で証言を入力するため、マイクへのアクセスが必要です。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>あなたの声を文字に変換して日記に記録するため、音声認識を使用します。</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

@@ -308,4 +308,31 @@ class FirestoreService {
         .doc(uid)
         .collection('entries');
   }
+
+  // 最新のAI所見キャッシュを取得する（未生成なら null を返す）
+  // ドキュメントは {text, generatedAt, periodDays} の形式で保存される
+  Future<Map<String, dynamic>?> getLatestAnalysis(String uid) async {
+    final doc = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('analyses')
+        .doc('latest')
+        .get();
+    if (doc.exists) return doc.data();
+    return null;
+  }
+
+  // AI所見テキストを analyses/latest に上書き保存する
+  Future<void> saveAnalysis(String uid, String text) async {
+    await _db
+        .collection('users')
+        .doc(uid)
+        .collection('analyses')
+        .doc('latest')
+        .set({
+      'text': text,
+      'periodDays': 14,
+      'generatedAt': FieldValue.serverTimestamp(),
+    });
+  }
 }

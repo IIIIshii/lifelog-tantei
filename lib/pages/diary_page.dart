@@ -82,6 +82,8 @@ class _DiaryPageState extends State<DiaryPage> {
   bool _customIntroPosted = false;    // カスタム質問の導入メッセージ投稿済みか
   bool _recallIntroPosted = false;    // 思い出しアシストの導入メッセージ投稿済みか
   int _eventMsgStart = 0;            // eventフェーズ開始時点の_messagesインデックス
+  int _aiFollowUpCount = 0;          // 既に投げたフォローアップ質問の回数
+  static const int _maxAiFollowUps = 3; // フォローアップ質問の上限回数
   final Queue<_Question> _customQueue = Queue(); // sleep/food/exercise/study + ユーザーカスタム質問
   final Queue<_Question> _recallQueue = Queue(); // 思い出しアシスト質問
   final Queue<_Question> _eventQueue = Queue();  // メインの出来事質問
@@ -415,8 +417,8 @@ class _DiaryPageState extends State<DiaryPage> {
       case _Phase.event:
         await _askNext();
       case _Phase.aiFollowUp:
-        _phase = _Phase.addendum;
-        await _askNext();
+        // ユーザー回答を受けて、再度 Gemini に「もう一度聞くか / 打ち切るか」を判断させる
+        await _askAiFollowUp();
       case _Phase.addendum:
         if (text == 'はい(追記事項の入力へ)') {
           // 自由記述の追記入力へ（回答をaddendum_textキーで記録）
@@ -437,23 +439,30 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
-  // Geminiに追加質問を生成させる（AIフェーズで1回呼ばれる）
-  // Geminiが「DONE」を返した場合はフォローアップをスキップしてaddendumへ進む
+  // Geminiに追加質問を生成させる。最大 _maxAiFollowUps 回まで繰り返し呼ばれる。
+  // Gemini が sufficient:true を返すか、上限に達した時点で addendum フェーズへ進む。
   Future<void> _askAiFollowUp() async {
+    // 既に上限に達していればこれ以上 Gemini を呼ばずに addendum へ
+    if (_aiFollowUpCount >= _maxAiFollowUps) {
+      _phase = _Phase.addendum;
+      await _askNext();
+      return;
+    }
     setState(() => _isLoading = true);
     try {
-      final followUp = await _gemini.generateFollowUp(_messages);
-      if (followUp == null) {
+      final result = await _gemini.generateFollowUp(_messages);
+      if (result.sufficient) {
         // 証言十分と判断されたためフォローアップをスキップ
         _phase = _Phase.addendum;
         await _askNext();
         return;
       }
+      _aiFollowUpCount++;
       await _firestore.saveMessage(
-          _uid!, _today!, 'ai', followUp, _conversationOrder++);
+          _uid!, _today!, 'ai', result.question, _conversationOrder++);
       setState(() {
-        _messages.add({'role': 'ai', 'text': followUp});
-        _pendingKey = 'ai_followup';
+        _messages.add({'role': 'ai', 'text': result.question});
+        _pendingKey = 'ai_followup_$_aiFollowUpCount';
       });
     } catch (e) {
       _showError('AIエラー: $e');
@@ -496,10 +505,13 @@ class _DiaryPageState extends State<DiaryPage> {
           _pendingKey = null;
           _currentChoices = null;
           _phase = _Phase.event;
+          _aiFollowUpCount = 0; // フォローアップ回数もリセット
         });
         // event関連の回答をクリアしてキューを再構築
         _answers.removeWhere((k, _) =>
-            k.startsWith('event_') || k == 'ai_followup' || k == 'addendum');
+            k.startsWith('event_') ||
+            k.startsWith('ai_followup') ||
+            k == 'addendum');
         _eventQueue.clear();
         for (final q in _eventQuestions) {
           _eventQueue.add(q);
