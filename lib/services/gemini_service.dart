@@ -13,6 +13,8 @@ class GeminiService {
   final GenerativeModel _diaryModel;
   // 過去エントリ群を読み返して所見を出すモデル
   final GenerativeModel _analysisModel;
+  // 自由記述への短いリアクション（相槌）を返すモデル。プレーンテキスト出力。
+  final GenerativeModel _reactionModel;
 
   final String _role;
 
@@ -52,6 +54,13 @@ class GeminiService {
           apiKey: apiKey,
           systemInstruction:
               Content.system(AiInstructions.detectiveAnalystRole),
+        ),
+        // インタビュアーと同じ人格指示だが、JSON構造化はせずプレーンテキストで相槌を返す
+        _reactionModel = GenerativeModel(
+          model: 'gemini-2.5-flash',
+          apiKey: apiKey,
+          systemInstruction:
+              Content.system(roleFor(role).interviewerInstruction),
         );
 
   // 会話履歴を渡して深掘り質問をGeminiに生成させる。
@@ -84,6 +93,19 @@ class GeminiService {
       // パース失敗時はフォローアップを諦めて先に進める方が UX が良い
     }
     return (sufficient: true, question: '');
+  }
+
+  // 会話履歴を渡して、直前の依頼人の証言への短いリアクション（相槌）を生成させる。
+  // 自由記述の回答に対してのみ呼ぶ（ボタン選択はロール定義の固定文面を使う）。
+  // 失敗・空応答時は空文字を返し、呼び出し側でリアクション表示をスキップさせる。
+  Future<String> generateReaction(List<Map<String, String>> messages) async {
+    final history = _buildHistory(messages);
+    final prompt =
+        '${AiInstructions.reactionHint(roleFor(_role).interviewerInstruction)}\n\n以下が依頼人の証言です：\n$history';
+    final response = await _reactionModel.generateContent([
+      Content.text(prompt),
+    ]);
+    return response.text?.trim() ?? '';
   }
 
   // 会話履歴から日記テキストをGeminiに生成させる。
