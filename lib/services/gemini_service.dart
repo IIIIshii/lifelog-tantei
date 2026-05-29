@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../prompts/ai_instructions.dart';
 import '../prompts/diary_prompts.dart';
+import '../roles/roles.dart';
 
 // Gemini APIとのやり取りを担当するサービスクラス。
 // インタビュー用と日記生成用でモデルを分け、それぞれに専用のシステム指示をセットする。
@@ -21,7 +22,7 @@ class GeminiService {
           model: 'gemini-2.5-flash',
           apiKey: apiKey,
           systemInstruction:
-              Content.system(AiInstructions.interviewerRoles[role] ?? AiInstructions.interviewerRoles['hardboiled']!),
+              Content.system(roleFor(role).interviewerInstruction),
           // 構造化出力: {sufficient: bool, question: string} を強制し、
           // 「DONE」文字列マッチによる脆い終了判定を廃止する
           generationConfig: GenerationConfig(
@@ -60,7 +61,8 @@ class GeminiService {
   Future<({bool sufficient, String question})> generateFollowUp(
       List<Map<String, String>> messages) async {
     final history = _buildHistory(messages);
-    final prompt = '${AiInstructions.followUpHint(_role)}\n\n以下が依頼人の証言です：\n$history';
+    final prompt =
+        '${AiInstructions.followUpHint(roleFor(_role).interviewerInstruction)}\n\n以下が依頼人の証言です：\n$history';
     final response = await _interviewModel.generateContent([
       Content.text(prompt),
     ]);
@@ -129,46 +131,5 @@ class GeminiService {
         .map((m) =>
             '${m['role'] == 'ai' ? '探偵' : '依頼人'}: ${m['text']}')
         .join('\n');
-  }
-
-
-  // セッション開始時に5W1Hの固定質問文をキャラクターに合わせて一括生成する。
-  // _interviewModel は {sufficient, question} スキーマを持つため、ここでは
-  // generationConfig を呼び出し単位で上書きして5キーのJSONを強制する。
-  // 失敗時は空Mapを返し、呼び出し側でデフォルト質問文へフォールバックさせる。
-  Future<Map<String, String>> generateQuestionTexts(String role) async {
-    final prompt = AiInstructions.generateQuestionTexts(role);
-    try {
-      final response = await _interviewModel.generateContent(
-        [Content.text(prompt)],
-        generationConfig: GenerationConfig(
-          responseMimeType: 'application/json',
-          responseSchema: Schema.object(
-            properties: {
-              'event_when': Schema.string(),
-              'event_where': Schema.string(),
-              'event_who': Schema.string(),
-              'event_what': Schema.string(),
-              'event_how': Schema.string(),
-            },
-            requiredProperties: [
-              'event_when',
-              'event_where',
-              'event_who',
-              'event_what',
-              'event_how',
-            ],
-          ),
-        ),
-      );
-      final text = response.text?.trim() ?? '';
-      final decoded = jsonDecode(text);
-      if (decoded is Map<String, dynamic>) {
-        return decoded.map((k, v) => MapEntry(k, v.toString()));
-      }
-    } catch (_) {
-      // ネットワーク・パース失敗時はデフォルト質問文にフォールバックさせる
-    }
-    return {};
   }
 }
