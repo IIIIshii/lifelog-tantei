@@ -23,6 +23,14 @@ class AuthService {
   Future<void> _ensureGoogleInitialized() async {
     if (_googleInitialized) return;
     final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'];
+    // serverClientId（FirebaseのWebクライアントID）が無いと、Androidでは
+    // idToken が取得できず Firebase 認証に通せない。早期に分かりやすく失敗させる。
+    if ((webClientId == null || webClientId.isEmpty)) {
+      throw StateError(
+        'GOOGLE_WEB_CLIENT_ID が .env に設定されていません。'
+        'Firebase の Web クライアントID（google-services.json の client_type:3）を設定してください。',
+      );
+    }
     await GoogleSignIn.instance.initialize(
       clientId: kIsWeb ? webClientId : null,
       serverClientId: !kIsWeb ? webClientId : null,
@@ -37,7 +45,16 @@ class AuthService {
     await _ensureGoogleInitialized();
     final account = await GoogleSignIn.instance.authenticate();
     final auth = account.authentication;
-    final credential = GoogleAuthProvider.credential(idToken: auth.idToken);
+    final idToken = auth.idToken;
+    // idToken が null の場合、SHA-1 未登録 / serverClientId 不一致などが疑われる。
+    // ここで握り潰すと GoogleAuthProvider.credential が分かりにくく失敗するため明示的に弾く。
+    if (idToken == null) {
+      throw StateError(
+        'Google から idToken を取得できませんでした。'
+        'Firebase に SHA-1 指紋が登録されているか、GOOGLE_WEB_CLIENT_ID が正しいか確認してください。',
+      );
+    }
+    final credential = GoogleAuthProvider.credential(idToken: idToken);
     final userCred = await _auth.signInWithCredential(credential);
     return userCred.user;
   }
