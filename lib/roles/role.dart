@@ -23,12 +23,25 @@ class Role {
   // 自由記述への反応は Gemini 生成（GeminiService.generateReaction）が担当するためここには持たない。
   final Map<String, String> reactionTexts;
 
+  // 事件簿（日記）生成時の文体・視点指示。AiInstructions.diaryWriter() に差し込まれる。
+  // 「100〜300字・ネガティブ禁止・本文のみ」等の不変ルールは AiInstructions 側に集約し、
+  // ここでは口調・人称・記録の形式だけを指定する（三人称を強制しない）。
+  // デフォルトはハードボイルド探偵の文体（未指定ロールの安全側フォールバック）。
+  final String diaryStyle;
+
+  // 所見（分析）生成時の文体指示。AiInstructions.analyst() に差し込まれる。
+  // 役割（傾向・兆候・励ましをまとめる）とルールは AiInstructions 側に集約する。
+  final String analystStyle;
+
   const Role({
     required this.key,
     required this.label,
     required this.interviewerInstruction,
     required this.questionTexts,
     this.reactionTexts = const {},
+    this.diaryStyle =
+        '寡黙でクールなハードボイルド探偵が記す捜査ログ。「依頼人は〜」「〜が確認された」のような硬質で簡潔な三人称で記述する。',
+    this.analystStyle = '寡黙な探偵が事件簿群を読み返す所見。硬質で簡潔な三人称で記す。',
   });
 
   // 指定キーの文面を返す。未定義のキーは fallback を返す（安全側）。
