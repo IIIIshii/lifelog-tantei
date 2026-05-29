@@ -192,6 +192,7 @@ class _DiaryPageState extends State<DiaryPage> {
     try {
       final settings = await _firestore.getUserSettings(_uid!);
       _currentRole = roleFor(settings.selectedRole);
+      _gemini = GeminiService(_apiKey, settings.selectedRole);
       _buildQueues(settings);
       await _askNext();
     } catch (e) {
