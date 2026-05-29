@@ -533,7 +533,11 @@ class _DiaryPageState extends State<DiaryPage> {
     } catch (_) {
       // リアクション生成失敗は無視して次の質問へ進む
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        // ローディング解除でスピナーが消えた最終レイアウトに追従する
+        _scrollToBottom();
+      }
     }
   }
 
@@ -566,6 +570,8 @@ class _DiaryPageState extends State<DiaryPage> {
       _showError('AIエラー: $e');
     } finally {
       setState(() => _isLoading = false);
+      // ローディング解除でスピナーが消えた最終レイアウトに対して追従する
+      _scrollToBottom();
     }
   }
 
@@ -670,6 +676,8 @@ class _DiaryPageState extends State<DiaryPage> {
       _showError('日記生成エラー: $e');
     } finally {
       setState(() => _isLoading = false);
+      // 末尾に追加された日記カードと、スピナー解除後のレイアウトに追従する
+      _scrollToBottom();
     }
   }
 
@@ -737,16 +745,31 @@ class _DiaryPageState extends State<DiaryPage> {
     return double.tryParse(text);
   }
 
-  // メッセージ追加後にリストを最下端へスクロールする
+  // メッセージ追加後にリストを最下端へスクロールする。
+  // IntrinsicHeight を含む吹き出しのレイアウト確定や、ローディング表示
+  // (スピナー) の表示・非表示切り替えによって maxScrollExtent が複数
+  // フレームにわたって変化するため、1フレーム後にスクロールしただけでは
+  // 最下端に届かないことがある。次のフレームで maxScrollExtent が伸びて
+  // いたら追従してスクロールし直す。
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scrollController.hasClients) return;
+        final max = _scrollController.position.maxScrollExtent;
+        if (_scrollController.offset < max) {
+          _scrollController.animateTo(
+            max,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
     });
   }
 
