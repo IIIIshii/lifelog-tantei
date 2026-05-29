@@ -23,6 +23,22 @@ class AiInstructions {
       'question 以外の余計な文章や前置きは出力しないでください。';
   }
 
+  // ── 自由記述へのリアクション時の隠し指示 ─────────────────────
+  // generateReaction 呼び出し時にプロンプトへ追加する。質問ではなく、直近の証言への
+  // 短い相槌・気づきを1文だけ返させる（次の固定質問は別途投げられるため問いかけない）。
+  //
+  // interviewerInstruction には選択中ロールの人格指示（Role.interviewerInstruction）を渡す。
+  // 人格は呼び出し側モデルの systemInstruction にも入っているため、ここでの注入は1回に留める。
+  static String reactionHint(String interviewerInstruction) {
+    return '$interviewerInstruction\n'
+        'この人格のまま、直前の依頼人の証言に対して短い相槌・気づきのコメントを返してください。\n'
+        '【厳守】\n'
+        '- 質問はしないこと。問いかけや「？」で終わらせない（次の質問は別途投げられる）。\n'
+        '- 1文だけ、簡潔に。前置き・見出し・引用符・依頼人の発言の繰り返しは不要。\n'
+        '- ネガティブな言葉・評価は一切使わないこと。\n'
+        '- 本文（コメント文）のみを出力すること。';
+  }
+
   // ── 日記生成モデルのシステム指示 ─────────────────────────────
   // 日記生成専用 GenerativeModel の systemInstruction として事前にセットする。
   static const String diaryWriterRole =

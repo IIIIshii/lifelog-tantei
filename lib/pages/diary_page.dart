@@ -379,6 +379,11 @@ class _DiaryPageState extends State<DiaryPage> {
   Future<void> _sendUserReply(String text) async {
     if (text.trim().isEmpty) return;
     _textController.clear();
+    // リアクション判定の材料を、状態をクリアする前に退避しておく。
+    // wasChoice: ボタン/ドロップダウンからの回答か（=固定リアクション対象）
+    // answeredKey: 回答が紐づく質問キー（line 400 で _pendingKey が消える前に保持）
+    final wasChoice = _currentChoices != null;
+    final answeredKey = _pendingKey;
     setState(() => _currentChoices = null); // 選択肢を閉じる
 
     // 「その他(自由記述)」「カスタム」選択時はフリーテキスト入力に切り替える（回答はまだ記録しない）
@@ -407,12 +412,14 @@ class _DiaryPageState extends State<DiaryPage> {
 
     switch (_phase) {
       case _Phase.custom:
+        await _maybeReact(wasChoice, answeredKey, text);
         await _askNext();
       case _Phase.customSaved:
         _includeCustomInDiary = (text == 'はい');
         _phase = _Phase.recall;
         await _askNext();
       case _Phase.recall:
+        await _maybeReact(wasChoice, answeredKey, text);
         await _askNext();
       case _Phase.recallSaved:
         _includeRecallInDiary = (text == 'はい');
@@ -445,6 +452,7 @@ class _DiaryPageState extends State<DiaryPage> {
           }
         }
       case _Phase.event:
+        await _maybeReact(wasChoice, answeredKey, text);
         await _askNext();
       case _Phase.aiFollowUp:
         // ユーザー回答を受けて、再度 Gemini に「もう一度聞くか / 打ち切るか」を判断させる
@@ -466,6 +474,44 @@ class _DiaryPageState extends State<DiaryPage> {
         break; // diaryViewフェーズはボタンで操作するため入力は無視
       case _Phase.done:
         break;
+    }
+  }
+
+  // 直前のユーザー回答に対して探偵の文脈リアクション（独立した吹き出し）を出す。
+  // _askNext() で次の固定質問を投げる前に呼ぶこと。
+  // - ボタン選択（wasChoice=true）: ロール定義の固定リアクションを引き、あれば表示（API無し）
+  // - 自由記述（wasChoice=false）: Gemini に短い相槌を生成させて表示（失敗時はスキップ）
+  // answeredKey が null（「次へ」等の導入・ナビ用ボタン）の場合は何もしない。
+  Future<void> _maybeReact(
+      bool wasChoice, String? answeredKey, String answer) async {
+    if (answeredKey == null) return;
+    // リアクション対象は実質的な質問フェーズのみ（確認・モード選択・追記等は対象外）
+    if (_phase != _Phase.custom &&
+        _phase != _Phase.recall &&
+        _phase != _Phase.event) {
+      return;
+    }
+
+    if (wasChoice) {
+      // ボタン選択 → ロール定義の固定リアクション（無ければ出さない）
+      final reaction = _currentRole.reaction(answeredKey, answer);
+      if (reaction != null && reaction.isNotEmpty) {
+        _postAiMessage(reaction);
+      }
+      return;
+    }
+
+    // 自由記述 → Gemini で文脈リアクションを生成。失敗してもフローは止めない。
+    setState(() => _isLoading = true);
+    try {
+      final reaction = await _gemini.generateReaction(_messages);
+      if (reaction.isNotEmpty) {
+        _postAiMessage(reaction);
+      }
+    } catch (_) {
+      // リアクション生成失敗は無視して次の質問へ進む
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
