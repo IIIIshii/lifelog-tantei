@@ -187,8 +187,30 @@ class _DiaryPageState extends State<DiaryPage> {
       return;
     }
 
-    // 追記する → 質問フローを開始
-    setState(() => _isLoading = true);
+    if (choice == '追記する') {
+      // 追記する → 既存日記を初期値として事件簿編集ページへ遷移
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DiaryEditPage(
+            uid: _uid!,
+            today: _today!,
+            firestore: _firestore,
+            initialDiary: _existingDiary,
+          ),
+        ),
+      );
+      return;
+    }
+
+    // いちから作り直す → 既存日記は破棄して通常の作成フローを開始する。
+    // _existingDiary を null にすることで _generateDiary が既存日記なし版を選び、
+    // 既存の内容がAIに渡らず、新たに取り直した分だけで生成される。
+    setState(() {
+      _existingDiary = null;
+      _isLoading = true;
+    });
     try {
       final settings = await _firestore.getUserSettings(_uid!);
       _currentRole = roleFor(settings.selectedRole);
@@ -824,15 +846,16 @@ class _DiaryPageState extends State<DiaryPage> {
               // ゴールドのローディングインジケーターでテーマに統一する
               child: CircularProgressIndicator(color: c.gold),
             ),
-          // 追記 or 確認の選択肢ボタン
+          // 追記 / 作り直し / 確認の選択肢ボタン（ラベルが長いため縦並び）
           if (_showExistingDiaryChoice && !_isLoading)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: ['追記する', '日記を確認する'].map((choice) {
-                  return Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Column(
+                children: ['追記する', 'いちから作り直す', '日記を確認する'].map((choice) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: SizedBox(
+                      width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () => _handleExistingDiaryChoice(choice),
                         style: ElevatedButton.styleFrom(
