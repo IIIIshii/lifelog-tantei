@@ -9,6 +9,7 @@ import '../core/theme/app_theme.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../core/theme/theme_controller.dart';
 import '../models/user_settings.dart';
+import '../roles/roles.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
@@ -219,12 +220,9 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final roles = [
-    ('hardboiled', 'ハードボイルド探偵'),
-    ('novice', '新卒探偵'),
-    ('alien', 'エイリアン'),
-    ('psychologist', '心理学者'),
-];
+    // ロール一覧はレジストリ（lib/roles/）から取得する。ラベルの二重管理を避ける。
+    final roles =
+        kRoles.values.map((r) => (r.key, r.label)).toList(growable: false);
     return Scaffold(
       backgroundColor: c.background,
 

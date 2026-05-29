@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/user_settings.dart';
+import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
 import '../widgets/message_bubble.dart';
@@ -88,7 +89,11 @@ class _DiaryPageState extends State<DiaryPage> {
   final Queue<_Question> _recallQueue = Queue(); // 思い出しアシスト質問
   final Queue<_Question> _eventQueue = Queue();  // メインの出来事質問
 
-  // メインの出来事質問リスト（_eventQuestionKeysと順序を合わせること）
+  // 選択中の探偵ロール。質問文・ナレーションの文面はこのロール定義から引く。
+  // 設定値（selectedRole）が未知でも roleFor() がデフォルトロールへフォールバックする。
+  late Role _currentRole;
+
+  // メインの出来事質問リスト（key→ロール定義の文面、無ければここの text をデフォルトに使う）
   static const List<_Question> _eventQuestions = [
     _Question(
       'それはいつの話だ？',
@@ -152,7 +157,9 @@ class _DiaryPageState extends State<DiaryPage> {
       }
 
       final settings = await _firestore.getUserSettings(_uid!);
-      _gemini = GeminiService(_apiKey, settings.selectedRole); // ← ここに追加
+      _currentRole = roleFor(settings.selectedRole);
+      _gemini = GeminiService(_apiKey, settings.selectedRole);
+      // 質問文・ナレーションはロール定義から同期的に引く（Gemini生成の待ちは無い）
       _buildQueues(settings);
       await _askNext();
     } catch (e) {
@@ -184,6 +191,7 @@ class _DiaryPageState extends State<DiaryPage> {
     setState(() => _isLoading = true);
     try {
       final settings = await _firestore.getUserSettings(_uid!);
+      _currentRole = roleFor(settings.selectedRole);
       _buildQueues(settings);
       await _askNext();
     } catch (e) {
@@ -196,10 +204,11 @@ class _DiaryPageState extends State<DiaryPage> {
   // ユーザー設定を元に各質問キューを構築する
   void _buildQueues(UserSettings settings) {
     // ── カスタム質問キュー（sleep/food/exercise/study + ユーザー定義）──
+    // 質問文はロール定義から引く（未定義キーは第2引数のデフォルト文を使う）。
     if (settings.recordSleep) {
-      _customQueue.add(const _Question(
-        '昨夜は何時間眠った？',
-        choices: [
+      _customQueue.add(_Question(
+        _currentRole.text('q_sleep', '昨夜は何時間眠った？'),
+        choices: const [
           '〜4時間', '4.5時間', '5時間', '5.5時間', '6時間', '6.5時間',
           '7時間', '7.5時間', '8時間', '8.5時間', '9時間', '9.5時間',
           '10時間', '10.5時間', '11時間', '11.5時間', '12時間', '12.5時間',
@@ -209,19 +218,20 @@ class _DiaryPageState extends State<DiaryPage> {
       ));
     }
     if (settings.recordFood) {
-      _customQueue.add(const _Question('今日、何を口にした？', key: 'food'));
+      _customQueue.add(
+          _Question(_currentRole.text('q_food', '今日、何を口にした？'), key: 'food'));
     }
     if (settings.recordExercise) {
-      _customQueue.add(const _Question(
-        '身体を動かしたか？',
-        choices: ['した', 'していない'],
+      _customQueue.add(_Question(
+        _currentRole.text('q_exercise', '身体を動かしたか？'),
+        choices: const ['した', 'していない'],
         key: 'exercise',
       ));
     }
     if (settings.recordStudy) {
-      _customQueue.add(const _Question(
-        '今日、頭を使う作業はしたか？',
-        choices: ['した', 'していない'],
+      _customQueue.add(_Question(
+        _currentRole.text('q_study', '今日、頭を使う作業はしたか？'),
+        choices: const ['した', 'していない'],
         key: 'study',
       ));
     }
@@ -233,15 +243,29 @@ class _DiaryPageState extends State<DiaryPage> {
     _hasRecallAssist = settings.recallAssist;
     if (settings.recallAssist) {
       _recallQueue.addAll([
-        const _Question('午前中の動向を報告してくれ。', key: 'morning'),
-        const _Question('午後はどう動いた？', key: 'afternoon'),
-        const _Question('夜の動向は？', key: 'evening'),
+        _Question(_currentRole.text('q_morning', '午前中の動向を報告してくれ。'),
+            key: 'morning'),
+        _Question(_currentRole.text('q_afternoon', '午後はどう動いた？'),
+            key: 'afternoon'),
+        _Question(_currentRole.text('q_evening', '夜の動向は？'), key: 'evening'),
       ]);
     }
 
     // ── メインの出来事質問キュー ──
+    _enqueueEventQuestions();
+  }
+
+  // _eventQuestions をキューに積む。ロール定義の質問文があれば text を差し替え、
+  // 無ければ元の text をデフォルトとして使う。choices・key は保持する。
+  void _enqueueEventQuestions() {
     for (final q in _eventQuestions) {
-      _eventQueue.add(q);
+      _eventQueue.add(
+        _Question(
+          _currentRole.text(q.key!, q.text),
+          choices: q.choices,
+          key: q.key,
+        ),
+      );
     }
   }
 
@@ -258,7 +282,7 @@ class _DiaryPageState extends State<DiaryPage> {
         if (!_customIntroPosted) {
           _customIntroPosted = true;
           _postAiMessage(
-            'まず、いくつか確認させてもらう。',
+            _currentRole.text('intro_custom', 'まず、いくつか確認させてもらう。'),
             choices: ['次へ'],
           );
           return;
@@ -276,7 +300,8 @@ class _DiaryPageState extends State<DiaryPage> {
             k.startsWith('custom_'));
         if (hasCustomAnswers) {
           _postAiMessage(
-            '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？',
+            _currentRole.text('confirm_include',
+                '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？'),
             choices: ['はい', 'いいえ'],
           );
         } else {
@@ -291,7 +316,9 @@ class _DiaryPageState extends State<DiaryPage> {
         }
         if (!_recallIntroPosted) {
           _recallIntroPosted = true;
-          _postAiMessage('今日一日の行動を洗いざらい話してもらおう。', choices: ['次へ']);
+          _postAiMessage(
+              _currentRole.text('intro_recall', '今日一日の行動を洗いざらい話してもらおう。'),
+              choices: ['次へ']);
           return;
         }
         if (_recallQueue.isNotEmpty) {
@@ -303,7 +330,8 @@ class _DiaryPageState extends State<DiaryPage> {
         }
       case _Phase.recallSaved:
         _postAiMessage(
-          '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？',
+          _currentRole.text('confirm_include',
+              '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？'),
           choices: ['はい', 'いいえ'],
         );
       case _Phase.modeSelect:
@@ -323,7 +351,7 @@ class _DiaryPageState extends State<DiaryPage> {
         break; // _askAiFollowUp() から直接呼ぶため何もしない
       case _Phase.addendum:
         _postAiMessage(
-          '他に言い残したことはあるか？',
+          _currentRole.text('ask_addendum', '他に言い残したことはあるか？'),
           choices: ['はい(追記事項の入力へ)', 'いいえ(日記の生成へ)'],
         );
       case _Phase.diaryView:
@@ -394,7 +422,8 @@ class _DiaryPageState extends State<DiaryPage> {
           _phase = _Phase.event;
           _eventMsgStart = _messages.length;
           _postAiMessage(
-            '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
+            _currentRole.text(
+                'intro_event', '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？'),
             choices: ['次へ'],
           );
         } else {
@@ -513,11 +542,10 @@ class _DiaryPageState extends State<DiaryPage> {
             k.startsWith('ai_followup') ||
             k == 'addendum');
         _eventQueue.clear();
-        for (final q in _eventQuestions) {
-          _eventQueue.add(q);
-        }
+        _enqueueEventQuestions();
         _postAiMessage(
-          '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
+          _currentRole.text(
+              'intro_event', '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？'),
           choices: ['次へ'],
         );
     }
