@@ -184,6 +184,9 @@ class _DiaryPageState extends State<DiaryPage> {
     setState(() => _isLoading = true);
     try {
       final settings = await _firestore.getUserSettings(_uid!);
+      // 既存日記ありの経路では _initSession が _gemini を代入する前に return している。
+      // 追記フローではここが _gemini の唯一の代入箇所になる（late final の単一代入を満たす）。
+      _gemini = GeminiService(_apiKey, settings.selectedRole);
       _buildQueues(settings);
       await _askNext();
     } catch (e) {
