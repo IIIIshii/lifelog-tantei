@@ -4,6 +4,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../services/auth_service.dart';
+import '../services/firestore_service.dart';
 
 // アプリ起動時の認証画面。Googleログインまたはゲスト（匿名）利用を選ばせる。
 // 認証成功後の遷移は AuthGate が StreamBuilder で自動的に行うため、
@@ -47,6 +48,25 @@ class _LoginPageState extends State<LoginPage> {
       await AuthService.instance.signInAsGuest();
     } on FirebaseAuthException catch (e) {
       if (mounted) _showError('ゲストログインに失敗しました', e.message ?? e.code);
+    } catch (e) {
+      if (mounted) _showError('予期せぬエラーが発生しました', '$e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // デモ用：ゲストログイン後、モックの事件簿7日分を一括投入する。
+  // 投入後の画面遷移は AuthGate が自動で行う（一覧はリアルタイム購読のため
+  // seed 完了次第ライブで反映される）。
+  Future<void> _startDemo() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    try {
+      await AuthService.instance.signInAsGuest();
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      await FirestoreService().seedMockData(uid);
+    } on FirebaseAuthException catch (e) {
+      if (mounted) _showError('デモの開始に失敗しました', e.message ?? e.code);
     } catch (e) {
       if (mounted) _showError('予期せぬエラーが発生しました', '$e');
     } finally {
@@ -174,6 +194,24 @@ class _LoginPageState extends State<LoginPage> {
                   '※ ゲストモードでは端末を変えるとデータを引き継げません',
                   style: TextStyle(fontSize: 11, color: c.textSecondary),
                   textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+
+                // ── デモボタン ──────────────────────────────────
+                // ゲストログイン＋モックの事件簿7日分を一括投入する
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton.icon(
+                    onPressed: _isLoading ? null : _startDemo,
+                    icon: const Icon(Icons.science_outlined, size: 18),
+                    label: const Text('デモを見る（サンプルデータ投入）'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: c.textSecondary,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      textStyle: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w500),
+                    ),
+                  ),
                 ),
               ],
             ),
