@@ -46,14 +46,14 @@ class GeminiService {
         _diaryModel = GenerativeModel(
           model: 'gemini-2.5-flash',
           apiKey: apiKey,
-          systemInstruction:
-              Content.system(AiInstructions.diaryWriterRole),
+          systemInstruction: Content.system(
+              AiInstructions.diaryWriter(roleFor(role).diaryStyle)),
         ),
         _analysisModel = GenerativeModel(
           model: 'gemini-2.5-flash',
           apiKey: apiKey,
-          systemInstruction:
-              Content.system(AiInstructions.detectiveAnalystRole),
+          systemInstruction: Content.system(
+              AiInstructions.analyst(roleFor(role).analystStyle)),
         ),
         // インタビュアーと同じ人格指示だが、JSON構造化はせずプレーンテキストで相槌を返す
         _reactionModel = GenerativeModel(
