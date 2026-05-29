@@ -88,6 +88,10 @@ class _DiaryPageState extends State<DiaryPage> {
   final Queue<_Question> _recallQueue = Queue(); // 思い出しアシスト質問
   final Queue<_Question> _eventQueue = Queue();  // メインの出来事質問
 
+  // セッション開始時にキャラクター別に生成した出来事質問文（key→質問文）。
+  // 生成に失敗したキーは _eventQuestions のデフォルト text にフォールバックする。
+  final Map<String, String> _eventQuestionTexts = {};
+
   // メインの出来事質問リスト（_eventQuestionKeysと順序を合わせること）
   static const List<_Question> _eventQuestions = [
     _Question(
@@ -152,7 +156,11 @@ class _DiaryPageState extends State<DiaryPage> {
       }
 
       final settings = await _firestore.getUserSettings(_uid!);
-      _gemini = GeminiService(_apiKey, settings.selectedRole); // ← ここに追加
+      _gemini = GeminiService(_apiKey, settings.selectedRole);
+      // キャラクターに合わせた出来事質問文を一括生成する（失敗時はデフォルト文を使う）
+      final questionTexts =
+          await _gemini.generateQuestionTexts(settings.selectedRole);
+      _eventQuestionTexts.addAll(questionTexts);
       _buildQueues(settings);
       await _askNext();
     } catch (e) {
@@ -240,8 +248,19 @@ class _DiaryPageState extends State<DiaryPage> {
     }
 
     // ── メインの出来事質問キュー ──
+    _enqueueEventQuestions();
+  }
+
+  // _eventQuestions をキューに積む。キャラ別の生成質問文があれば text を差し替え、
+  // 無ければ元の text をそのまま使う（生成失敗時のフォールバック）。
+  void _enqueueEventQuestions() {
     for (final q in _eventQuestions) {
-      _eventQueue.add(q);
+      final customText = _eventQuestionTexts[q.key];
+      _eventQueue.add(
+        (customText != null && customText.isNotEmpty)
+            ? _Question(customText, choices: q.choices, key: q.key)
+            : q,
+      );
     }
   }
 
@@ -513,9 +532,7 @@ class _DiaryPageState extends State<DiaryPage> {
             k.startsWith('ai_followup') ||
             k == 'addendum');
         _eventQueue.clear();
-        for (final q in _eventQuestions) {
-          _eventQueue.add(q);
-        }
+        _enqueueEventQuestions();
         _postAiMessage(
           '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
           choices: ['次へ'],

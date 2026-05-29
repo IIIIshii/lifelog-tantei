@@ -51,6 +51,22 @@ class AiInstructions {
       'question 以外の余計な文章や前置きは出力しないでください。';
   }
 
+
+  static String generateQuestionTexts(String role) {
+  return 'あなたは${interviewerRoles[role]}として与えられた人格になり、\n'
+    'event_when=いつ、event_where=どこで、event_who=誰と、'
+    'event_what=何を、event_how=どうだったか、という質問文を生成してください。\n'
+    '質問文は長すぎず、しかし${interviewerRoles[role]}らしさを感じるような'
+    'アイデンティティにあふれた質問文を作成してください。\n'
+    '余計な文章や前置きは絶対に出力しないでください。\n'
+    '\n'
+    '出力は次のJSON形式に従ってください：\n'
+    '{"event_when": "質問文", "event_where": "質問文", '
+    '"event_who": "質問文", "event_what": "質問文", "event_how": "質問文"}';
+}
+
+
+
   // ── 日記生成モデルのシステム指示 ─────────────────────────────
   // 日記生成専用 GenerativeModel の systemInstruction として事前にセットする。
   static const String diaryWriterRole =

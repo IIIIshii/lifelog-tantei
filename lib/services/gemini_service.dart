@@ -130,4 +130,45 @@ class GeminiService {
             '${m['role'] == 'ai' ? '探偵' : '依頼人'}: ${m['text']}')
         .join('\n');
   }
+
+
+  // セッション開始時に5W1Hの固定質問文をキャラクターに合わせて一括生成する。
+  // _interviewModel は {sufficient, question} スキーマを持つため、ここでは
+  // generationConfig を呼び出し単位で上書きして5キーのJSONを強制する。
+  // 失敗時は空Mapを返し、呼び出し側でデフォルト質問文へフォールバックさせる。
+  Future<Map<String, String>> generateQuestionTexts(String role) async {
+    final prompt = AiInstructions.generateQuestionTexts(role);
+    try {
+      final response = await _interviewModel.generateContent(
+        [Content.text(prompt)],
+        generationConfig: GenerationConfig(
+          responseMimeType: 'application/json',
+          responseSchema: Schema.object(
+            properties: {
+              'event_when': Schema.string(),
+              'event_where': Schema.string(),
+              'event_who': Schema.string(),
+              'event_what': Schema.string(),
+              'event_how': Schema.string(),
+            },
+            requiredProperties: [
+              'event_when',
+              'event_where',
+              'event_who',
+              'event_what',
+              'event_how',
+            ],
+          ),
+        ),
+      );
+      final text = response.text?.trim() ?? '';
+      final decoded = jsonDecode(text);
+      if (decoded is Map<String, dynamic>) {
+        return decoded.map((k, v) => MapEntry(k, v.toString()));
+      }
+    } catch (_) {
+      // ネットワーク・パース失敗時はデフォルト質問文にフォールバックさせる
+    }
+    return {};
+  }
 }
