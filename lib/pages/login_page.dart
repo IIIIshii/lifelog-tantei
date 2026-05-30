@@ -55,7 +55,7 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // デモ用：ゲストログイン後、モックの事件簿7日分を一括投入する。
+  // デモ用：ゲストログイン後、モックの事件簿14日分を一括投入する。
   // 投入後の画面遷移は AuthGate が自動で行う（一覧はリアルタイム購読のため
   // seed 完了次第ライブで反映される）。
   Future<void> _startDemo() async {
