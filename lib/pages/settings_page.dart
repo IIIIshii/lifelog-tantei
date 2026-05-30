@@ -490,7 +490,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                         ),
                         subtitle: Text(
-                          '直近7日分のサンプル日記を上書き保存します',
+                          '直近14日分のサンプル日記を上書き保存します',
                           style: TextStyle(
                             fontSize: 12,
                             color: c.textSecondary,
