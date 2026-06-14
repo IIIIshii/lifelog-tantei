@@ -93,6 +93,11 @@ class _DiaryPageState extends State<DiaryPage> {
   // 設定値（selectedRole）が未知でも roleFor() がデフォルトロールへフォールバックする。
   late Role _currentRole;
 
+  int _totalQuestions = 0;
+  int _answeredQuestionCount = 0;
+
+
+
   // メインの出来事質問リスト（key→ロール定義の文面、無ければここの text をデフォルトに使う）
   static const List<_Question> _eventQuestions = [
     _Question(
@@ -276,7 +281,15 @@ class _DiaryPageState extends State<DiaryPage> {
 
     // ── メインの出来事質問キュー ──
     _enqueueEventQuestions();
+
+    _calcTotalQuestions();
   }
+
+
+  void _calcTotalQuestions() {
+    _totalQuestions = _customQueue.length + _recallQueue.length + _eventQueue.length;
+  }
+
 
   // _eventQuestions をキューに積む。ロール定義の質問文があれば text を差し替え、
   // 無ければ元の text をデフォルトとして使う。choices・key は保持する。
@@ -424,6 +437,9 @@ class _DiaryPageState extends State<DiaryPage> {
         final hours = _parseSleepHours(text);
         if (hours != null) _numericAnswers['sleep'] = hours;
       }
+
+      _answeredQuestionCount++;
+
       _pendingKey = null;
     }
 
@@ -1069,6 +1085,22 @@ class _DiaryPageState extends State<DiaryPage> {
                 ],
               ),
             ),
+
+          // 進捗バー（質問フェーズ中のみ表示）
+          if (_totalQuestions > 0 &&
+              !_diaryGenerated &&
+              _phase != _Phase.diaryView &&
+              _phase != _Phase.done)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: LinearProgressIndicator(
+                value: _answeredQuestionCount / _totalQuestions,
+                backgroundColor: c.appBarBg,
+                valueColor: AlwaysStoppedAnimation<Color>(c.gold),
+              ),
+            ),
+
+
           if (!_showExistingDiaryChoice && showInput)
             InputArea(controller: _textController, onSubmit: _sendUserReply),
         ],
