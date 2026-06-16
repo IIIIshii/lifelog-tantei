@@ -1092,8 +1092,9 @@ class _DiaryPageState extends State<DiaryPage> {
               _phase != _Phase.diaryView &&
               _phase != _Phase.done)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: LinearProgressIndicator(
+                minHeight: 8,
                 value: _answeredQuestionCount / _totalQuestions,
                 backgroundColor: c.appBarBg,
                 valueColor: AlwaysStoppedAnimation<Color>(c.gold),
