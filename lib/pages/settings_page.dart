@@ -9,7 +9,6 @@ import '../core/theme/app_theme.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../core/theme/theme_controller.dart';
 import '../models/user_settings.dart';
-import '../roles/roles.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
@@ -220,9 +219,6 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    // ロール一覧はレジストリ（lib/roles/）から取得する。ラベルの二重管理を避ける。
-    final roles =
-        kRoles.values.map((r) => (r.key, r.label)).toList(growable: false);
     return Scaffold(
       backgroundColor: c.background,
 
@@ -275,33 +271,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 8),
                 _AccountCard(onLogout: _confirmLogout),
                 const SizedBox(height: 28),
-
-
-              // ── セクション0: 探偵キャラクター選択 ──────────────────────
-              const _SectionHeader(
-                title: '◆ 探偵キャラクター',
-                subtitle: '尋問する探偵を選択',
-              ),
-              const SizedBox(height: 8),
-              RadioGroup<String>(
-                groupValue: _settings.selectedRole,
-                onChanged: (v) {
-                  if (v != null) _save(_settings.copyWith(selectedRole: v));
-                },
-                child: _SettingsCard(
-                  children: [
-                    for (var i = 0; i < roles.length; i++) ...[
-                      RadioListTile<String>(
-                        title: Text(roles[i].$2),
-                        value: roles[i].$1,
-                      ),
-                      if (i < roles.length - 1)
-                        Divider(height: 1, color: c.cardBorder),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 28),
 
                 // ── セクション1: 捜査項目 ──────────────────────
                 const _SectionHeader(
