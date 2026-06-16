@@ -14,6 +14,7 @@
 class Role {
   final String key; // 'hardboiled' など。UserSettings.selectedRole と一致させる
   final String label; // 設定画面に表示する名称
+  final String description; // キャラ選択画面に表示する一言紹介
   final String interviewerInstruction; // Gemini の systemInstruction / followUp 用の人格指示
   final Map<String, String> questionTexts; // 質問・ナレーションキー → 文面
 
@@ -36,6 +37,7 @@ class Role {
   const Role({
     required this.key,
     required this.label,
+    this.description = '寡黙でクール。事実を淡々と捜査ログに記す。',
     required this.interviewerInstruction,
     required this.questionTexts,
     this.reactionTexts = const {},

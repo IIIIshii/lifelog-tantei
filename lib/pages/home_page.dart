@@ -5,6 +5,7 @@ import '../core/theme/detective_text_styles.dart';
 import 'diary_page.dart';
 import 'analytics_page.dart';
 import 'diary_list_page.dart';
+import 'role_select_page.dart';
 import 'settings_page.dart';
 
 // アプリのホーム画面。4つのメニューカードを表示する。
@@ -89,6 +90,17 @@ class HomePage extends StatelessWidget {
             const SizedBox(height: 16),
             _CaseFileCard(
               caseNumber: 'No.04',
+              icon: Icons.person_search,
+              title: '探偵を指名する',
+              subtitle: '（キャラクターを選ぶ）',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const RoleSelectPage()),
+              ),
+            ),
+            const SizedBox(height: 16),
+            _CaseFileCard(
+              caseNumber: 'No.05',
               icon: Icons.business_center,
               title: '探偵事務所',
               subtitle: '（設定する）',
