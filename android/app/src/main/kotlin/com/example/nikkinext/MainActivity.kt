@@ -1,5 +1,7 @@
 package com.example.nikkinext
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity : FlutterActivity()
+// healthパッケージ（Health Connectの権限フロー）がFragmentActivityを要求するため
+// FlutterActivityではなくFlutterFragmentActivityを継承する
+class MainActivity : FlutterFragmentActivity()

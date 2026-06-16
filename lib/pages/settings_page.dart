@@ -12,6 +12,7 @@ import '../models/user_settings.dart';
 import '../roles/roles.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
+import '../services/health_service.dart';
 import '../services/notification_service.dart';
 
 // ユーザーが捜査（記録）方針を設定する画面
@@ -108,6 +109,57 @@ class _SettingsPageState extends State<SettingsPage> {
     } else {
       await NotificationService.instance.cancel();
     }
+  }
+
+  // スマートウォッチ連携（Health Connect）のON/OFFを切り替える。
+  // ONにする際はHealth Connect本体の有無を確認し、睡眠データの読み取り権限をリクエストする。
+  Future<void> _toggleHealthSync(bool enabled) async {
+    if (!enabled) {
+      await _save(_settings.copyWith(healthSyncEnabled: false));
+      return;
+    }
+
+    // Health Connect本体が無い端末（Android 13以前など）ではインストールを案内する
+    if (!await HealthService.instance.isAvailable()) {
+      if (!mounted) return;
+      final install = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Health Connectが必要だ'),
+          content: const Text(
+              'ウォッチの睡眠記録を読み取るには「Health Connect」アプリが必要だ。インストールするか？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('キャンセル'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('インストール'),
+            ),
+          ],
+        ),
+      );
+      if (install == true) {
+        await HealthService.instance.installHealthConnect();
+      }
+      // トグルはOFFのまま。インストール完了後に改めてONにしてもらう
+      return;
+    }
+
+    final granted = await HealthService.instance.requestPermissions();
+    if (!granted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                '睡眠データの読み取りが許可されなかった。Health Connectアプリの設定からも許可できる。'),
+          ),
+        );
+      }
+      return;
+    }
+    await _save(_settings.copyWith(healthSyncEnabled: true));
   }
 
   // 時刻ピッカーを表示して通知時刻を更新する
@@ -331,9 +383,25 @@ class _SettingsPageState extends State<SettingsPage> {
                       title: '睡眠時間',
                       subtitle: '昨夜の睡眠について記録します',
                       value: _settings.recordSleep,
-                      onChanged: (v) =>
-                          _save(_settings.copyWith(recordSleep: v)),
+                      // OFFにしたらウォッチ連携も連動してOFFにする（状態の不整合を防ぐ）
+                      onChanged: (v) => _save(_settings.copyWith(
+                        recordSleep: v,
+                        healthSyncEnabled:
+                            v ? _settings.healthSyncEnabled : false,
+                      )),
                     ),
+                    // ウォッチ連携はHealth Connectが使えるプラットフォーム（Android）のみ表示
+                    if (HealthService.instance.isSupported) ...[
+                      Divider(height: 1, color: c.cardBorder),
+                      _SettingsTile(
+                        title: 'スマートウォッチ連携',
+                        subtitle: 'Health Connectから昨夜の睡眠時間を自動取得します',
+                        value: _settings.healthSyncEnabled,
+                        // 睡眠時間の記録がOFFのときはグレーアウト
+                        onChanged:
+                            _settings.recordSleep ? _toggleHealthSync : null,
+                      ),
+                    ],
                     Divider(height: 1, color: c.cardBorder),
                     _SettingsTile(
                       title: '食べたもの',

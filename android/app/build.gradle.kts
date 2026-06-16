@@ -28,7 +28,8 @@ android {
         applicationId = "com.example.nikkinext"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // healthパッケージ（Health Connect）がAPI 26以上を要求するため引き上げ
+        minSdk = maxOf(flutter.minSdkVersion, 26)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

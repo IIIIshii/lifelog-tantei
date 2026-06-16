@@ -3,6 +3,7 @@ class UserSettings {
   final bool recordEvent; // 今日の印象的な出来事を記録するか（デフォルトON）
   final bool recallAssist; // 午前・午後・夜の時間帯別質問を追加するか
   final bool recordSleep; // 睡眠時間を記録するか
+  final bool healthSyncEnabled; // Health Connectから睡眠時間を自動取得するか（recordSleepがONのときのみ有効）
   final bool recordFood; // 食事内容を記録するか
   final bool recordExercise; // 運動習慣を記録するか
   final bool recordStudy; // 勉強内容を記録するか
@@ -16,6 +17,7 @@ class UserSettings {
     this.recordEvent = true,
     this.recallAssist = false,
     this.recordSleep = false,
+    this.healthSyncEnabled = false,
     this.recordFood = false,
     this.recordExercise = false,
     this.recordStudy = false,
@@ -35,6 +37,7 @@ class UserSettings {
       recordEvent: map['recordEvent'] as bool? ?? true,
       recallAssist: map['recallAssist'] as bool? ?? false,
       recordSleep: map['recordSleep'] as bool? ?? false,
+      healthSyncEnabled: map['healthSyncEnabled'] as bool? ?? false,
       recordFood: map['recordFood'] as bool? ?? false,
       recordExercise: map['recordExercise'] as bool? ?? false,
       recordStudy: map['recordStudy'] as bool? ?? false,
@@ -53,6 +56,7 @@ class UserSettings {
       'recordEvent': recordEvent,
       'recallAssist': recallAssist,
       'recordSleep': recordSleep,
+      'healthSyncEnabled': healthSyncEnabled,
       'recordFood': recordFood,
       'recordExercise': recordExercise,
       'recordStudy': recordStudy,
@@ -69,6 +73,7 @@ class UserSettings {
     bool? recordEvent,
     bool? recallAssist,
     bool? recordSleep,
+    bool? healthSyncEnabled,
     bool? recordFood,
     bool? recordExercise,
     bool? recordStudy,
@@ -82,6 +87,7 @@ class UserSettings {
       recordEvent: recordEvent ?? this.recordEvent,
       recallAssist: recallAssist ?? this.recallAssist,
       recordSleep: recordSleep ?? this.recordSleep,
+      healthSyncEnabled: healthSyncEnabled ?? this.healthSyncEnabled,
       recordFood: recordFood ?? this.recordFood,
       recordExercise: recordExercise ?? this.recordExercise,
       recordStudy: recordStudy ?? this.recordStudy,
