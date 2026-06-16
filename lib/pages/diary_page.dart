@@ -8,6 +8,7 @@ import '../models/user_settings.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
+import '../services/health_service.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/diary_card.dart';
 import '../widgets/input_area.dart';
@@ -69,6 +70,7 @@ class _DiaryPageState extends State<DiaryPage> {
   String? _pendingKey; // 直前のAI質問のキー（次のユーザー回答をanswersに紐づけるため）
   final Map<String, String> _answers = {}; // 質問キー → 回答テキストのマップ
   final Map<String, double> _numericAnswers = {}; // 質問キー → 数値回答のマップ
+  double? _watchSleepHours; // Health Connectから取得した前夜の睡眠時間（取得できなければnull）
 
   final ScrollController _scrollController = ScrollController();
 
@@ -159,6 +161,7 @@ class _DiaryPageState extends State<DiaryPage> {
       final settings = await _firestore.getUserSettings(_uid!);
       _currentRole = roleFor(settings.selectedRole);
       _gemini = GeminiService(_apiKey, settings.selectedRole);
+      await _fetchWatchSleep(settings);
       // 質問文・ナレーションはロール定義から同期的に引く（Gemini生成の待ちは無い）
       _buildQueues(settings);
       await _askNext();
@@ -166,6 +169,15 @@ class _DiaryPageState extends State<DiaryPage> {
       _showError('初期化エラー: $e');
     } finally {
       setState(() => _isLoading = false);
+    }
+  }
+
+  // ウォッチ連携が有効なら前夜の睡眠時間をHealth Connectから取得する。
+  // 取得できない場合は null のままにして手動質問にフォールバックする。
+  Future<void> _fetchWatchSleep(UserSettings settings) async {
+    _watchSleepHours = null;
+    if (settings.recordSleep && settings.healthSyncEnabled) {
+      _watchSleepHours = await HealthService.instance.getLastNightSleepHours();
     }
   }
 
@@ -215,6 +227,7 @@ class _DiaryPageState extends State<DiaryPage> {
       final settings = await _firestore.getUserSettings(_uid!);
       _currentRole = roleFor(settings.selectedRole);
       _gemini = GeminiService(_apiKey, settings.selectedRole);
+      await _fetchWatchSleep(settings);
       _buildQueues(settings);
       await _askNext();
     } catch (e) {
@@ -229,16 +242,16 @@ class _DiaryPageState extends State<DiaryPage> {
     // ── カスタム質問キュー（sleep/food/exercise/study + ユーザー定義）──
     // 質問文はロール定義から引く（未定義キーは第2引数のデフォルト文を使う）。
     if (settings.recordSleep) {
-      _customQueue.add(_Question(
-        _currentRole.text('q_sleep', '昨夜は何時間眠った？'),
-        choices: const [
-          '〜4時間', '4.5時間', '5時間', '5.5時間', '6時間', '6.5時間',
-          '7時間', '7.5時間', '8時間', '8.5時間', '9時間', '9.5時間',
-          '10時間', '10.5時間', '11時間', '11.5時間', '12時間', '12.5時間',
-          '13時間〜', 'カスタム',
-        ],
-        key: 'sleep',
-      ));
+      if (_watchSleepHours != null) {
+        // ウォッチ計測値が取れた場合は確認質問に差し替える（「修正する」で手動質問へ）
+        _customQueue.add(_Question(
+          'ウォッチの記録によれば、昨夜の睡眠は${_formatWatchSleep(_watchSleepHours!)}だ。間違いないか？',
+          choices: const ['はい、記録する', '修正する'],
+          key: 'sleep_watch',
+        ));
+      } else {
+        _customQueue.add(_manualSleepQuestion());
+      }
     }
     if (settings.recordFood) {
       _customQueue.add(
@@ -276,6 +289,20 @@ class _DiaryPageState extends State<DiaryPage> {
 
     // ── メインの出来事質問キュー ──
     _enqueueEventQuestions();
+  }
+
+  // 手動入力式の睡眠時間質問。ウォッチ連携なし時と「修正する」選択時の両方で使う
+  _Question _manualSleepQuestion() {
+    return _Question(
+      _currentRole.text('q_sleep', '昨夜は何時間眠った？'),
+      choices: const [
+        '〜4時間', '4.5時間', '5時間', '5.5時間', '6時間', '6.5時間',
+        '7時間', '7.5時間', '8時間', '8.5時間', '9時間', '9.5時間',
+        '10時間', '10.5時間', '11時間', '11.5時間', '12時間', '12.5時間',
+        '13時間〜', 'カスタム',
+      ],
+      key: 'sleep',
+    );
   }
 
   // _eventQuestions をキューに積む。ロール定義の質問文があれば text を差し替え、
@@ -417,8 +444,18 @@ class _DiaryPageState extends State<DiaryPage> {
       return;
     }
 
-    // 直前の質問にキーがあれば回答をanswersマップに記録する
-    if (_pendingKey != null) {
+    // ウォッチ計測の睡眠時間の確認質問への回答を処理する
+    if (_pendingKey == 'sleep_watch') {
+      _pendingKey = null;
+      if (text == 'はい、記録する') {
+        _answers['sleep'] = '${_formatWatchSleep(_watchSleepHours!)}（ウォッチ計測）';
+        _numericAnswers['sleep'] = _watchSleepHours!;
+      } else {
+        // 「修正する」→ 手動選択肢の質問をキュー先頭に積み直す
+        _customQueue.addFirst(_manualSleepQuestion());
+      }
+    } else if (_pendingKey != null) {
+      // 直前の質問にキーがあれば回答をanswersマップに記録する
       _answers[_pendingKey!] = text;
       if (_pendingKey == 'sleep') {
         final hours = _parseSleepHours(text);
@@ -732,6 +769,14 @@ class _DiaryPageState extends State<DiaryPage> {
         );
       }).toList(),
     );
+  }
+
+  // ウォッチ計測の睡眠時間（時間単位のdouble）を「7時間24分」表記に変換する
+  String _formatWatchSleep(double hours) {
+    final totalMinutes = (hours * 60).round();
+    final h = totalMinutes ~/ 60;
+    final m = totalMinutes % 60;
+    return m == 0 ? '$h時間' : '$h時間$m分';
   }
 
   // 睡眠時間の文字列を時間数（double）にパースする

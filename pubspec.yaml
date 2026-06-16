@@ -48,6 +48,7 @@ dependencies:
   shared_preferences: ^2.3.2 # テーマ設定を端末ローカルに永続化するため使用
   google_sign_in: ^7.2.0 # Googleログイン（authenticate APIを使用する7.x系）
   speech_to_text: ^7.0.0 # OS標準の音声認識APIを利用した日本語の音声入力
+  health: ^13.3.0 # Health Connect経由でスマートウォッチの睡眠データを取得
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
