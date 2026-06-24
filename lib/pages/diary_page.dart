@@ -69,6 +69,10 @@ class _DiaryPageState extends State<DiaryPage> {
   String? _pendingKey; // 直前のAI質問のキー（次のユーザー回答をanswersに紐づけるため）
   final Map<String, String> _answers = {}; // 質問キー → 回答テキストのマップ
   final Map<String, double> _numericAnswers = {}; // 質問キー → 数値回答のマップ
+  final Set<String> _skippedKeys = {}; // スキップした質問キー（Firestoreへ保存）
+  // スキップ済みイベント質問の_messagesインデックス（Gemini除外用）。
+  // イベント質問とその「（スキップ）」吹き出しの両方を登録する。
+  final Set<int> _skippedMsgIndices = {};
 
   final ScrollController _scrollController = ScrollController();
 
@@ -515,6 +519,57 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
+  // 現在の質問をスキップする。回答は記録せず（_answersに入れない）、
+  // スキップした事実だけを_skippedKeysに残す。リアクションも出さない。
+  // - カスタム/思い出し質問: _answersに入れないだけで_buildAdditionalContext()から自動除外される
+  // - イベント/AI追質問: 質問吹き出しとスキップ吹き出しのindexを_skippedMsgIndicesに登録し、
+  //   日記生成時(_generateDiary)に会話履歴から除外する
+  Future<void> _skipCurrentQuestion() async {
+    final answeredKey = _pendingKey;
+    // 回答対象の質問（キー付き）のときのみスキップ可能。
+    // 「次へ」「はい/いいえ」等の導入・確認・ナビ用ボタンは対象外。
+    if (answeredKey == null) return;
+
+    setState(() => _currentChoices = null); // 選択肢を閉じる
+    _skippedKeys.add(answeredKey);
+    _answeredQuestionCount++;
+    _pendingKey = null;
+
+    // イベント/AI追質問はメッセージ列がそのままGeminiに渡るため、
+    // 質問吹き出しのindexと、これから追加するスキップ吹き出しのindexを除外対象に登録する。
+    if (_phase == _Phase.event || _phase == _Phase.aiFollowUp) {
+      _skippedMsgIndices.add(_messages.length - 1); // 直前のAI質問
+      _skippedMsgIndices.add(_messages.length); // これから追加するスキップ吹き出し
+    }
+
+    // 継続性のためユーザー側に「（スキップ）」吹き出しを表示する
+    await _firestore.saveMessage(
+        _uid!, _today!, 'user', '（スキップ）', _conversationOrder++);
+    setState(() => _messages.add({'role': 'user', 'text': '（スキップ）'}));
+    _scrollToBottom();
+
+    switch (_phase) {
+      case _Phase.custom:
+      case _Phase.recall:
+      case _Phase.event:
+        await _askNext();
+      case _Phase.aiFollowUp:
+        // 追質問のスキップは深掘りを打ち切り、追記フェーズへ進む
+        _phase = _Phase.addendum;
+        await _askNext();
+      case _Phase.addendum:
+        // 追記の自由記述をスキップ → 追記なしで日記生成へ
+        _phase = _Phase.diaryView;
+        await _generateDiary();
+      case _Phase.customSaved:
+      case _Phase.recallSaved:
+      case _Phase.modeSelect:
+      case _Phase.diaryView:
+      case _Phase.done:
+        break; // これらのフェーズはキー付き質問ではないためスキップ対象外
+    }
+  }
+
   // 直前のユーザー回答に対して探偵の文脈リアクション（独立した吹き出し）を出す。
   // _askNext() で次の固定質問を投げる前に呼ぶこと。
   // - ボタン選択（wasChoice=true）: ロール定義の固定リアクションを引き、あれば表示（API無し）
@@ -627,11 +682,17 @@ class _DiaryPageState extends State<DiaryPage> {
           _phase = _Phase.event;
           _aiFollowUpCount = 0; // フォローアップ回数もリセット
         });
-        // event関連の回答をクリアしてキューを再構築
+        // event関連の回答・スキップ記録をクリアしてキューを再構築
         _answers.removeWhere((k, _) =>
             k.startsWith('event_') ||
             k.startsWith('ai_followup') ||
             k == 'addendum');
+        _skippedKeys.removeWhere((k) =>
+            k.startsWith('event_') ||
+            k.startsWith('ai_followup') ||
+            k == 'addendum');
+        // _messagesは_eventMsgStart以降をremoveRangeするためevent範囲のindexは全クリアでよい
+        _skippedMsgIndices.clear();
         _eventQueue.clear();
         _enqueueEventQuestions();
         _postAiMessage(
@@ -669,8 +730,12 @@ class _DiaryPageState extends State<DiaryPage> {
       _isLoading = true;
     });
     try {
-      // eventフェーズ以降のメッセージ＋オプションの追加コンテキストで日記を生成する
-      final eventMessages = _messages.sublist(_eventMsgStart);
+      // eventフェーズ以降のメッセージ＋オプションの追加コンテキストで日記を生成する。
+      // スキップされた質問とその「（スキップ）」吹き出しはGeminiに渡さない。
+      final eventMessages = [
+        for (var i = _eventMsgStart; i < _messages.length; i++)
+          if (!_skippedMsgIndices.contains(i)) _messages[i],
+      ];
       final additionalContext = _buildAdditionalContext();
       final diary = _existingDiary != null
           ? await _gemini.generateDiaryWithExisting(
@@ -681,7 +746,8 @@ class _DiaryPageState extends State<DiaryPage> {
       await Future.wait([
         _firestore.saveDiary(_uid!, _today!, diary),
         _firestore.saveAnswers(_uid!, _today!, _answers,
-            numericAnswers: _numericAnswers),
+            numericAnswers: _numericAnswers,
+            skippedKeys: _skippedKeys.toList()),
       ]);
       _postAiMessage('事件簿を作成した。確認してくれ。');
       setState(() {
@@ -822,6 +888,10 @@ class _DiaryPageState extends State<DiaryPage> {
         _currentChoices == null &&
         _phase != _Phase.diaryView &&
         _phase != _Phase.done;
+    // スキップボタンは回答対象の質問（キー付き）が表示中のときだけ出す。
+    // 導入・確認・モード選択ボタン（キーなし）には出さない。
+    final canSkip =
+        (showChoices || showInput) && _pendingKey != null && !_showExistingDiaryChoice;
 
     final c = context.colors;
     return Scaffold(
@@ -1104,6 +1174,20 @@ class _DiaryPageState extends State<DiaryPage> {
 
           if (!_showExistingDiaryChoice && showInput)
             InputArea(controller: _textController, onSubmit: _sendUserReply),
+
+          // この質問をスキップ（回答対象の質問が表示中のときのみ）
+          if (canSkip)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: TextButton.icon(
+                onPressed: _skipCurrentQuestion,
+                icon: Icon(Icons.skip_next, size: 18, color: c.appBarSubtitle),
+                label: Text(
+                  'この質問をスキップ',
+                  style: TextStyle(color: c.appBarSubtitle),
+                ),
+              ),
+            ),
         ],
       ),
     );
