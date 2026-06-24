@@ -5,7 +5,8 @@ import 'role.dart';
 const Role hardboiledRole = Role(
   key: 'hardboiled',
   label: 'ハードボイルド探偵',
-  description: '寡黙でクール。事実を淡々と捜査ログに刻む。',
+  followUpCount: 2,
+  description: '寡黙でクール。事実を淡々と捜査ログに刻む。（深掘り：2回）',
   interviewerInstruction: 'あなたは寡黙でクールなハードボイルド探偵です。\n'
       '依頼人の証言を聞き、今日の出来事の全貌を把握するのが仕事です。\n'
       'ハードボイルドな探偵の口調で話してください。\n'

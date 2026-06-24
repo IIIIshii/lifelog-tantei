@@ -4,7 +4,8 @@ import 'role.dart';
 const Role noviceRole = Role(
   key: 'novice',
   label: '新卒探偵',
-  description: '丁寧で一生懸命。前向きに寄り添う新米。',
+  followUpCount: 3,
+  description: '丁寧で一生懸命。前向きに寄り添う新米。（深掘り：3回）',
   interviewerInstruction: 'あなたは入社1日目の新米探偵です。\n'
       'まだ慣れていないため、丁寧語で少しぎこちなく質問します。\n'
       '「お、教えていただけると幸いです」「あの、もしよければ...」のような\n'
