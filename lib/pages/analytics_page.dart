@@ -86,7 +86,20 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         if (dailyComment != null) {
           _dailyAnalysisText = dailyComment['text'] as String?;
           final ts = dailyComment['generatedAt'];
-          if (ts is Timestamp) _dailyAnalysisGeneratedAt = ts.toDate();
+          if (ts is Timestamp) {
+            final generated = ts.toDate();
+            final now = DateTime.now();
+            final isToday = generated.year == now.year &&
+                generated.month == now.month &&
+                generated.day == now.day;
+            if (isToday) {
+              _dailyAnalysisGeneratedAt = generated;
+            } else {
+              // 日付が変わっている場合は古いキャッシュなので表示しない
+              _dailyAnalysisText = null;
+              _dailyAnalysisGeneratedAt = null;
+            }
+          }
         }
         _isLoading = false;
       });
