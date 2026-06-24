@@ -23,6 +23,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   bool _isLoading = true;
   bool _isGeneratingAnalysis = false;
+  bool _isGeneratingDailyAnalysis = false;
   // YYYY-MM-DD → 睡眠時間（記録なし日はnull）
   final Map<String, double?> _sleepData = {};
   // YYYY-MM-DD → エントリ全データ
@@ -30,7 +31,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   UserSettings? _settings;
   _AnalyticsSummary? _summary;
   String? _analysisText;
+  String? _dailyAnalysisText;
   DateTime? _analysisGeneratedAt;
+  DateTime? _dailyAnalysisGeneratedAt;
 
   static const int _days = 14;
 
@@ -48,16 +51,17 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       final entriesFuture = _firestore.getRecentEntries(uid, _days);
       final settingsFuture = _firestore.getUserSettings(uid);
       final analysisFuture = _firestore.getLatestAnalysis(uid);
+      final dailyCommentFuture = _firestore.getTodayComment(uid);
       final entries = await entriesFuture;
       final settings = await settingsFuture;
       final analysis = await analysisFuture;
+      final dailyComment = await dailyCommentFuture;
 
       final sleepData = <String, double?>{};
       final entriesData = <String, Map<String, dynamic>>{};
       for (final entry in entries) {
         entriesData[entry.key] = entry.value;
-        final numeric =
-            entry.value['numericAnswers'] as Map<String, dynamic>?;
+        final numeric = entry.value['numericAnswers'] as Map<String, dynamic>?;
         final sleep = numeric?['sleep'];
         sleepData[entry.key] = sleep != null ? (sleep as num).toDouble() : null;
       }
@@ -79,6 +83,24 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           final ts = analysis['generatedAt'];
           if (ts is Timestamp) _analysisGeneratedAt = ts.toDate();
         }
+        if (dailyComment != null) {
+          _dailyAnalysisText = dailyComment['text'] as String?;
+          final ts = dailyComment['generatedAt'];
+          if (ts is Timestamp) {
+            final generated = ts.toDate();
+            final now = DateTime.now();
+            final isToday = generated.year == now.year &&
+                generated.month == now.month &&
+                generated.day == now.day;
+            if (isToday) {
+              _dailyAnalysisGeneratedAt = generated;
+            } else {
+              // 日付が変わっている場合は古いキャッシュなので表示しない
+              _dailyAnalysisText = null;
+              _dailyAnalysisGeneratedAt = null;
+            }
+          }
+        }
         _isLoading = false;
       });
     } catch (_) {
@@ -89,16 +111,16 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Future<void> _generateAnalysis() async {
     if (_isGeneratingAnalysis) return;
     if (_entriesData.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('まだ事件簿が記録されていない')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('まだ事件簿が記録されていない')));
       return;
     }
     final gemini = _gemini;
     if (gemini == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('初期化が完了していない')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('初期化が完了していない')));
       return;
     }
     setState(() => _isGeneratingAnalysis = true);
@@ -118,9 +140,58 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isGeneratingAnalysis = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('所見の生成に失敗した: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('所見の生成に失敗した: $e')));
+    }
+  }
+
+  Future<void> _generateDailyAnalysis() async {
+    if (_isGeneratingDailyAnalysis) return;
+    if (_entriesData.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('まだ事件簿が記録されていない')));
+      return;
+    }
+    final gemini = _gemini;
+    if (gemini == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('初期化が完了していない')));
+      return;
+    }
+    setState(() => _isGeneratingDailyAnalysis = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      final todayEntry = _entriesData[today];
+
+      if (todayEntry == null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('今日の記録がまだない')));
+        setState(() => _isGeneratingDailyAnalysis = false);
+        return;
+      }
+
+      final recentEntries = _entriesData.entries
+          .map((e) => MapEntry(e.key, e.value))
+          .toList();
+      final text = await gemini.generateDailyComment(todayEntry, recentEntries);
+      await _firestore.saveTodayComment(uid, text);
+      if (!mounted) return;
+      setState(() {
+        _dailyAnalysisText = text;
+        _dailyAnalysisGeneratedAt = DateTime.now();
+        _isGeneratingDailyAnalysis = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isGeneratingDailyAnalysis = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('コメントの生成に失敗した: $e')));
     }
   }
 
@@ -147,12 +218,17 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('証拠分析室',
-                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
+            Text(
+              '証拠分析室',
+              style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
+            ),
             const SizedBox(height: 2),
-            Text('― データを読む ―',
-                style: DetectiveTextStyles.appBarSubtitle(
-                    color: c.appBarSubtitle)),
+            Text(
+              '― データを読む ―',
+              style: DetectiveTextStyles.appBarSubtitle(
+                color: c.appBarSubtitle,
+              ),
+            ),
           ],
         ),
       ),
@@ -170,6 +246,15 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     generatedAt: _analysisGeneratedAt,
                     isLoading: _isGeneratingAnalysis,
                     onGenerate: _generateAnalysis,
+                  ),
+                  const SizedBox(height: 32),
+                  _SectionHeader(title: '今日の行動', subtitle: '本日分'),
+                  const SizedBox(height: 16),
+                  _AiInsightSection(
+                    text: _dailyAnalysisText,
+                    generatedAt: _dailyAnalysisGeneratedAt,
+                    isLoading: _isGeneratingDailyAnalysis,
+                    onGenerate: _generateDailyAnalysis,
                   ),
                   const SizedBox(height: 32),
                   _SectionHeader(title: 'サマリー', subtitle: '直近$_days日間'),
@@ -216,12 +301,14 @@ class _SectionHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(title,
-            style: DetectiveTextStyles.cardTitle(color: c.textPrimary)
-                .copyWith(fontSize: 18)),
+        Text(
+          title,
+          style: DetectiveTextStyles.cardTitle(
+            color: c.textPrimary,
+          ).copyWith(fontSize: 18),
+        ),
         const SizedBox(width: 8),
-        Text(subtitle,
-            style: TextStyle(fontSize: 12, color: c.textSecondary)),
+        Text(subtitle, style: TextStyle(fontSize: 12, color: c.textSecondary)),
       ],
     );
   }
@@ -242,20 +329,23 @@ class _SleepChart extends StatelessWidget {
     final barGroups = <BarChartGroupData>[];
     for (var i = 0; i < dates.length; i++) {
       final hours = sleepData[dates[i]];
-      barGroups.add(BarChartGroupData(
-        x: i,
-        barRods: [
-          BarChartRodData(
-            toY: hours ?? 0,
-            color: hours != null
-                ? c.gold
-                : c.goldLight.withValues(alpha: 0.2),
-            width: 14,
-            borderRadius:
-                const BorderRadius.vertical(top: Radius.circular(4)),
-          ),
-        ],
-      ));
+      barGroups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: hours ?? 0,
+              color: hours != null
+                  ? c.gold
+                  : c.goldLight.withValues(alpha: 0.2),
+              width: 14,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(4),
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
     return Container(
@@ -275,10 +365,8 @@ class _SleepChart extends StatelessWidget {
             gridData: FlGridData(
               show: true,
               horizontalInterval: 2,
-              getDrawingHorizontalLine: (value) => FlLine(
-                color: c.cardBorder,
-                strokeWidth: 1,
-              ),
+              getDrawingHorizontalLine: (value) =>
+                  FlLine(color: c.cardBorder, strokeWidth: 1),
               drawVerticalLine: false,
             ),
             borderData: FlBorderData(show: false),
@@ -309,17 +397,18 @@ class _SleepChart extends StatelessWidget {
                       angle: -0.4,
                       child: Text(
                         '${parts[1]}/${parts[2]}',
-                        style:
-                            TextStyle(fontSize: 9, color: c.textSecondary),
+                        style: TextStyle(fontSize: 9, color: c.textSecondary),
                       ),
                     );
                   },
                 ),
               ),
               topTitles: const AxisTitles(
-                  sideTitles: SideTitles(showTitles: false)),
+                sideTitles: SideTitles(showTitles: false),
+              ),
               rightTitles: const AxisTitles(
-                  sideTitles: SideTitles(showTitles: false)),
+                sideTitles: SideTitles(showTitles: false),
+              ),
             ),
             barTouchData: BarTouchData(
               touchTooltipData: BarTouchTooltipData(
@@ -388,43 +477,41 @@ class _RecordsTable extends StatelessWidget {
           headingRowHeight: 38,
           dataRowMinHeight: 36,
           dataRowMaxHeight: 52,
-          headingRowColor:
-              WidgetStateProperty.all(c.gold.withValues(alpha: 0.12)),
+          headingRowColor: WidgetStateProperty.all(
+            c.gold.withValues(alpha: 0.12),
+          ),
           headingTextStyle: TextStyle(
             color: c.textPrimary,
             fontWeight: FontWeight.bold,
             fontSize: 12,
           ),
-          dataTextStyle: TextStyle(
-            color: c.textSecondary,
-            fontSize: 12,
-          ),
+          dataTextStyle: TextStyle(color: c.textSecondary, fontSize: 12),
           dividerThickness: 0.5,
-          columns: allHeaders
-              .map((h) => DataColumn(label: Text(h)))
-              .toList(),
+          columns: allHeaders.map((h) => DataColumn(label: Text(h))).toList(),
           rows: dates.map((date) {
-            final answers = entriesData[date]?['answers']
-                as Map<String, dynamic>?;
+            final answers =
+                entriesData[date]?['answers'] as Map<String, dynamic>?;
             final parts = date.split('-');
             final dateLabel = '${parts[1]}/${parts[2]}';
 
             final fixedCells = [
-              DataCell(Text(dateLabel,
+              DataCell(
+                Text(
+                  dateLabel,
                   style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: c.textPrimary,
-                      fontSize: 12))),
+                    fontWeight: FontWeight.w600,
+                    color: c.textPrimary,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
               ..._fixedKeys.map((key) {
                 final val = answers?[key] as String?;
                 return DataCell(_TableCell(value: val));
               }),
             ];
 
-            final customCells = customQuestions
-                .asMap()
-                .entries
-                .map((e) {
+            final customCells = customQuestions.asMap().entries.map((e) {
               final val = answers?['custom_${e.key}'] as String?;
               return DataCell(_TableCell(value: val));
             }).toList();
@@ -446,8 +533,7 @@ class _TableCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     if (value == null) {
-      return Text('—',
-          style: TextStyle(color: c.cardBorder, fontSize: 12));
+      return Text('—', style: TextStyle(color: c.cardBorder, fontSize: 12));
     }
     return Text(
       value!,
@@ -534,8 +620,9 @@ class _AnalyticsSummary {
       avgSleep: sleeps.isEmpty
           ? null
           : sleeps.reduce((a, b) => a + b) / sleeps.length,
-      exerciseRate:
-          exerciseRecorded == 0 ? null : exerciseDone / exerciseRecorded,
+      exerciseRate: exerciseRecorded == 0
+          ? null
+          : exerciseDone / exerciseRecorded,
       studyRate: studyRecorded == 0 ? null : studyDone / studyRecorded,
       streakDays: streak,
       recordedDays: recordedSet.length,
@@ -562,9 +649,7 @@ class _SummaryCards extends StatelessWidget {
     final cards = <Widget>[
       _StatCard(
         label: '平均睡眠',
-        value: s.avgSleep == null
-            ? '—'
-            : '${s.avgSleep!.toStringAsFixed(1)}h',
+        value: s.avgSleep == null ? '—' : '${s.avgSleep!.toStringAsFixed(1)}h',
       ),
       _StatCard(
         label: '運動実施率',
@@ -574,14 +659,9 @@ class _SummaryCards extends StatelessWidget {
       ),
       _StatCard(
         label: '勉強実施率',
-        value: s.studyRate == null
-            ? '—'
-            : '${(s.studyRate! * 100).round()}%',
+        value: s.studyRate == null ? '—' : '${(s.studyRate! * 100).round()}%',
       ),
-      _StatCard(
-        label: '連続記録',
-        value: '${s.streakDays}日',
-      ),
+      _StatCard(label: '連続記録', value: '${s.streakDays}日'),
     ];
 
     return LayoutBuilder(
@@ -623,13 +703,13 @@ class _StatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: TextStyle(fontSize: 11, color: c.textSecondary)),
+          Text(label, style: TextStyle(fontSize: 11, color: c.textSecondary)),
           const SizedBox(height: 6),
           Text(
             value,
-            style: DetectiveTextStyles.cardTitle(color: c.gold)
-                .copyWith(fontSize: 22),
+            style: DetectiveTextStyles.cardTitle(
+              color: c.gold,
+            ).copyWith(fontSize: 22),
           ),
         ],
       ),
@@ -668,11 +748,7 @@ class _DistributionCharts extends StatelessWidget {
           );
         }
         return Column(
-          children: [
-            emotionChart,
-            const SizedBox(height: 12),
-            placeChart,
-          ],
+          children: [emotionChart, const SizedBox(height: 12), placeChart],
         );
       },
     );
@@ -706,16 +782,19 @@ class _PieCard extends StatelessWidget {
     for (var i = 0; i < sortedEntries.length; i++) {
       final e = sortedEntries[i];
       final color = _palette[i % _palette.length];
-      sections.add(PieChartSectionData(
-        value: e.value.toDouble(),
-        color: color,
-        title: '${(e.value / total * 100).round()}%',
-        titleStyle: const TextStyle(
+      sections.add(
+        PieChartSectionData(
+          value: e.value.toDouble(),
+          color: color,
+          title: '${(e.value / total * 100).round()}%',
+          titleStyle: const TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.bold,
-            color: Colors.white),
-        radius: 52,
-      ));
+            color: Colors.white,
+          ),
+          radius: 52,
+        ),
+      );
     }
 
     return Container(
@@ -728,9 +807,12 @@ class _PieCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: DetectiveTextStyles.cardTitle(color: c.textPrimary)
-                  .copyWith(fontSize: 14)),
+          Text(
+            title,
+            style: DetectiveTextStyles.cardTitle(
+              color: c.textPrimary,
+            ).copyWith(fontSize: 14),
+          ),
           const SizedBox(height: 8),
           SizedBox(
             height: 140,
@@ -764,15 +846,15 @@ class _PieCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       label,
-                      style:
-                          TextStyle(fontSize: 11, color: c.textSecondary),
+                      style: TextStyle(fontSize: 11, color: c.textSecondary),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text('$count',
-                      style: TextStyle(
-                          fontSize: 11, color: c.textSecondary)),
+                  Text(
+                    '$count',
+                    style: TextStyle(fontSize: 11, color: c.textSecondary),
+                  ),
                 ],
               ),
             );
@@ -828,19 +910,21 @@ class _AiInsightSection extends StatelessWidget {
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: c.gold),
+                    strokeWidth: 2,
+                    color: c.gold,
+                  ),
                 ),
                 const SizedBox(width: 10),
-                Text('探偵が記録を読み返している…',
-                    style: TextStyle(
-                        fontSize: 13, color: c.textSecondary)),
+                Text(
+                  '探偵が記録を読み返している…',
+                  style: TextStyle(fontSize: 13, color: c.textSecondary),
+                ),
               ],
             ),
           ] else if (hasText) ...[
             Text(
               text!,
-              style: TextStyle(
-                  fontSize: 13, color: c.textPrimary, height: 1.6),
+              style: TextStyle(fontSize: 13, color: c.textPrimary, height: 1.6),
             ),
             const SizedBox(height: 12),
             Row(
@@ -849,16 +933,17 @@ class _AiInsightSection extends StatelessWidget {
                 if (generatedAt != null)
                   Text(
                     '記録: ${_formatTimestamp(generatedAt!)}',
-                    style:
-                        TextStyle(fontSize: 10, color: c.textSecondary),
+                    style: TextStyle(fontSize: 10, color: c.textSecondary),
                   )
                 else
                   const SizedBox.shrink(),
                 TextButton.icon(
                   onPressed: onGenerate,
                   icon: Icon(Icons.refresh, size: 16, color: c.gold),
-                  label: Text('再推理',
-                      style: TextStyle(color: c.gold, fontSize: 12)),
+                  label: Text(
+                    '再推理',
+                    style: TextStyle(color: c.gold, fontSize: 12),
+                  ),
                 ),
               ],
             ),
@@ -903,8 +988,10 @@ class _EmptyCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: c.cardBorder),
       ),
-      child: Text(message,
-          style: TextStyle(fontSize: 12, color: c.textSecondary)),
+      child: Text(
+        message,
+        style: TextStyle(fontSize: 12, color: c.textSecondary),
+      ),
     );
   }
 }

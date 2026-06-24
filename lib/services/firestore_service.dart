@@ -58,7 +58,12 @@ class FirestoreService {
 
   // 会話の1メッセージをFirestoreに保存する（順序orderで並び替えできるようにする）
   Future<void> saveMessage(
-      String uid, String date, String role, String text, int order) async {
+    String uid,
+    String date,
+    String role,
+    String text,
+    int order,
+  ) async {
     await _db
         .collection('users')
         .doc(uid)
@@ -66,18 +71,21 @@ class FirestoreService {
         .doc(date)
         .collection('conversation')
         .add({
-      'role': role,
-      'text': text,
-      'order': order,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
+          'role': role,
+          'text': text,
+          'order': order,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
   }
 
   // 質問キー→回答テキストのマップをFirestoreに保存する（既存データとマージする）
   // numericAnswers が渡された場合は数値データも同時に保存する
   Future<void> saveAnswers(
-      String uid, String date, Map<String, String> answers,
-      {Map<String, double>? numericAnswers}) async {
+    String uid,
+    String date,
+    Map<String, String> answers, {
+    Map<String, double>? numericAnswers,
+  }) async {
     if (answers.isEmpty && (numericAnswers == null || numericAnswers.isEmpty)) {
       return;
     }
@@ -96,7 +104,9 @@ class FirestoreService {
 
   // 直近 days 日分のエントリを日付文字列とデータのペアで返す
   Future<List<MapEntry<String, Map<String, dynamic>>>> getRecentEntries(
-      String uid, int days) async {
+    String uid,
+    int days,
+  ) async {
     final now = DateTime.now();
     final from = now.subtract(Duration(days: days - 1));
     final fromStr = from.toIso8601String().split('T')[0];
@@ -115,12 +125,7 @@ class FirestoreService {
 
   // 生成した日記テキストをFirestoreに保存する（既存データとマージする）
   Future<void> saveDiary(String uid, String date, String diary) async {
-    await _db
-        .collection('users')
-        .doc(uid)
-        .collection('entries')
-        .doc(date)
-        .set({
+    await _db.collection('users').doc(uid).collection('entries').doc(date).set({
       'diary': diary,
       'timestamp': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -141,10 +146,7 @@ class FirestoreService {
       recordFood: true,
       recordExercise: true,
       recordStudy: true,
-      customQuestions: [
-        '今日、心が動く瞬間はあった？',
-        '今日、初めて・新しく挑戦したことは？',
-      ],
+      customQuestions: ['今日、心が動く瞬間はあった？', '今日、初めて・新しく挑戦したことは？'],
       selectedRole: 'hardboiled',
     );
     await saveUserSettings(uid, demoSettings);
@@ -152,7 +154,8 @@ class FirestoreService {
     // 古い順（13日前→今日）に並べたエントリ列。doc IDは投入時に動的生成する。
     final entries = <Map<String, dynamic>>[
       {
-        'diary': '七時間の睡眠で一日が明けた。午前を洗濯と部屋の片付けに充てた依頼人は、昼下がり、近所のカフェにいた。読書の手を止め、ふと思い立って注文をすべて英語で通したという。店員はごく自然に応じ、拍子抜けするほど呆気なく事は済んだ。本人は「面白かった」とだけ漏らしている。夜は友人とのオンラインゲーム。体も頭も程よく動かした一日だったことが確認された。',
+        'diary':
+            '七時間の睡眠で一日が明けた。午前を洗濯と部屋の片付けに充てた依頼人は、昼下がり、近所のカフェにいた。読書の手を止め、ふと思い立って注文をすべて英語で通したという。店員はごく自然に応じ、拍子抜けするほど呆気なく事は済んだ。本人は「面白かった」とだけ漏らしている。夜は友人とのオンラインゲーム。体も頭も程よく動かした一日だったことが確認された。',
         'answers': {
           'sleep': '7時間',
           'food': 'カフェのパスタ',
@@ -172,7 +175,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 7.0},
       },
       {
-        'diary': '六時間の睡眠。午前は統計学と線形代数の講義で埋まっていた。昼、依頼人は学内の図書館へ向かう。初めて自習室を予約し、その一室にこもったという。静寂が思考を運び、停滞していたレポートは一気に最後まで書き上がった。本人は「集中できた」と手応えを語っている。夕食を済ませると糸が切れたように眠りに落ちたことが記録されている。短い夜だったが、机の上の達成は確かだ。',
+        'diary':
+            '六時間の睡眠。午前は統計学と線形代数の講義で埋まっていた。昼、依頼人は学内の図書館へ向かう。初めて自習室を予約し、その一室にこもったという。静寂が思考を運び、停滞していたレポートは一気に最後まで書き上がった。本人は「集中できた」と手応えを語っている。夕食を済ませると糸が切れたように眠りに落ちたことが記録されている。短い夜だったが、机の上の達成は確かだ。',
         'answers': {
           'sleep': '6時間',
           'food': '学食のカレー',
@@ -192,7 +196,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 6.0},
       },
       {
-        'diary': '午前のプログラミング演習を終え、依頼人は研究室にこもった。午後いっぱいを費やした相手は、pandasのgroupbyに潜む一つのバグ。ドキュメントを丹念に読み返すうち、原因はようやく姿を現したという。長く追い続けた糸口がほどけた瞬間、本人は「すっきりした」と短く息を吐いた。夜はジムでランニングとストレッチ。自炊の鶏むね肉で締めた一日は、頭も体も使い切ったことが確認された。睡眠は七時間。',
+        'diary':
+            '午前のプログラミング演習を終え、依頼人は研究室にこもった。午後いっぱいを費やした相手は、pandasのgroupbyに潜む一つのバグ。ドキュメントを丹念に読み返すうち、原因はようやく姿を現したという。長く追い続けた糸口がほどけた瞬間、本人は「すっきりした」と短く息を吐いた。夜はジムでランニングとストレッチ。自炊の鶏むね肉で締めた一日は、頭も体も使い切ったことが確認された。睡眠は七時間。',
         'answers': {
           'sleep': '7時間',
           'food': '鶏むね肉の照り焼き（自炊）',
@@ -212,7 +217,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 7.0},
       },
       {
-        'diary': '睡眠は五時間と短い。午前は機械学習入門のオンライン講義に充て、午後は近所を三十分歩いてから昼寝で体を整えたという。夜、依頼人は友人に誘われ居酒屋の席に着いた。長らく苦手としてきたレバーが運ばれてくる。意を決して口に運ぶと、不思議と箸が止まらず、ついには完食。本人も「自分でも驚いた」と面白がっている。唐揚げと枝豆を囲んだ賑やかな夜だったことが記録されている。',
+        'diary':
+            '睡眠は五時間と短い。午前は機械学習入門のオンライン講義に充て、午後は近所を三十分歩いてから昼寝で体を整えたという。夜、依頼人は友人に誘われ居酒屋の席に着いた。長らく苦手としてきたレバーが運ばれてくる。意を決して口に運ぶと、不思議と箸が止まらず、ついには完食。本人も「自分でも驚いた」と面白がっている。唐揚げと枝豆を囲んだ賑やかな夜だったことが記録されている。',
         'answers': {
           'sleep': '5時間',
           'food': '居酒屋',
@@ -232,7 +238,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 5.0},
       },
       {
-        'diary': '八時間の睡眠が、この日の冴えを支えていたのかもしれない。午前は英語とデータ構造の講義。その流れのまま、午後の図書館で依頼人は試験勉強に没頭した。ふと、習ったばかりのヒープを何も見ずに一から書き起こしてみたという。手は驚くほど滑らかに動き、コードは淀みなく組み上がった。「自信がついた」と本人は手応えを口にしている。帰宅後は入浴と読書で静かに一日を閉じたことが確認された。',
+        'diary':
+            '八時間の睡眠が、この日の冴えを支えていたのかもしれない。午前は英語とデータ構造の講義。その流れのまま、午後の図書館で依頼人は試験勉強に没頭した。ふと、習ったばかりのヒープを何も見ずに一から書き起こしてみたという。手は驚くほど滑らかに動き、コードは淀みなく組み上がった。「自信がついた」と本人は手応えを口にしている。帰宅後は入浴と読書で静かに一日を閉じたことが確認された。',
         'answers': {
           'sleep': '8時間',
           'food': '日替わり定食',
@@ -252,7 +259,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 8.0},
       },
       {
-        'diary': '六時間の睡眠で迎えた朝は、確率論の講義と小テストから始まった。午後四時、依頼人はカフェの制服に袖を通す。閉店までの五時間、いつもは言葉少なに皿を運ぶだけの本人が、この日は常連客へ自ら声をかけたという。新メニューの感想を尋ねると、相手は思いのほか饒舌に語ってくれた。「聞いてよかった」と本人は嬉しげだ。まかないのカレーで腹を満たし、帰宅後はシャワーを浴びて床に就いたことが記録されている。',
+        'diary':
+            '六時間の睡眠で迎えた朝は、確率論の講義と小テストから始まった。午後四時、依頼人はカフェの制服に袖を通す。閉店までの五時間、いつもは言葉少なに皿を運ぶだけの本人が、この日は常連客へ自ら声をかけたという。新メニューの感想を尋ねると、相手は思いのほか饒舌に語ってくれた。「聞いてよかった」と本人は嬉しげだ。まかないのカレーで腹を満たし、帰宅後はシャワーを浴びて床に就いたことが記録されている。',
         'answers': {
           'sleep': '6時間',
           'food': 'アルバイト先でまかない（カレー）',
@@ -272,7 +280,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 6.0},
       },
       {
-        'diary': '九時間。たっぷりの睡眠から始まった休日だった。午前はYoutubeを横目にストレッチで体をほぐし、ホットケーキで遅い朝食を取ったという。午後からはハッカソンの開発に没頭。FlutterにGemini APIをつなぎ込む作業が、夜になってついに実を結んだ。画面の向こうでAIが初めて返答を寄こした瞬間、依頼人は「感動した」と声を弾ませている。デリバリーのピザで祝杯をあげ、レビューの準備まで手をつけたことが確認された。',
+        'diary':
+            '九時間。たっぷりの睡眠から始まった休日だった。午前はYoutubeを横目にストレッチで体をほぐし、ホットケーキで遅い朝食を取ったという。午後からはハッカソンの開発に没頭。FlutterにGemini APIをつなぎ込む作業が、夜になってついに実を結んだ。画面の向こうでAIが初めて返答を寄こした瞬間、依頼人は「感動した」と声を弾ませている。デリバリーのピザで祝杯をあげ、レビューの準備まで手をつけたことが確認された。',
         'answers': {
           'sleep': '9時間',
           'food': 'デリバリーのピザ',
@@ -292,7 +301,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 9.0},
       },
       {
-        'diary': '夜明け前、まだ街が眠るうちに依頼人は布団を抜け出した。七時間の睡眠で目覚めは軽い。向かった先は近所の公園。これまで縁のなかった早朝のランニングに、思い切って足を踏み出したという。澄んだ空気と人気のない並木道は、想像していたよりずっと心地よかったらしい。「面白かった」と本人は息を弾ませている。午後はアルゴリズムの講義に出席し、鮭の塩焼きで夕食を済ませると、いつもより早く床に就いたことが記録されている。',
+        'diary':
+            '夜明け前、まだ街が眠るうちに依頼人は布団を抜け出した。七時間の睡眠で目覚めは軽い。向かった先は近所の公園。これまで縁のなかった早朝のランニングに、思い切って足を踏み出したという。澄んだ空気と人気のない並木道は、想像していたよりずっと心地よかったらしい。「面白かった」と本人は息を弾ませている。午後はアルゴリズムの講義に出席し、鮭の塩焼きで夕食を済ませると、いつもより早く床に就いたことが記録されている。',
         'answers': {
           'sleep': '7時間',
           'food': '鮭の塩焼き（自炊）',
@@ -312,7 +322,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 7.0},
       },
       {
-        'diary': '六時間の睡眠。午前から依頼人はスライドの最終確認に余念がなかった。迎えた午後、研究室の輪講。初めて発表者の側に立った本人は、用意してきた論文の要点を一つずつ言葉にしていったという。質疑にも詰まることなく応じ、終えたときには大役を果たした実感が残った。「やりきった」と本人は晴れやかだ。夜は友人との通話でささやかな打ち上げ。張り詰めた一日を、笑い声で締めくくったことが確認された。',
+        'diary':
+            '六時間の睡眠。午前から依頼人はスライドの最終確認に余念がなかった。迎えた午後、研究室の輪講。初めて発表者の側に立った本人は、用意してきた論文の要点を一つずつ言葉にしていったという。質疑にも詰まることなく応じ、終えたときには大役を果たした実感が残った。「やりきった」と本人は晴れやかだ。夜は友人との通話でささやかな打ち上げ。張り詰めた一日を、笑い声で締めくくったことが確認された。',
         'answers': {
           'sleep': '6時間',
           'food': '学食の定食',
@@ -332,7 +343,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 6.0},
       },
       {
-        'diary': '七時間の睡眠で迎えた一日は、微分積分の講義から動き出した。午後は課題と読書に費やし、帰路、依頼人はふと路地裏の古本屋に立ち寄ったという。棚を端から目で追っていた指が、一冊で止まる。長く探し続けていた絶版の数学書が、そこに静かに収まっていた。「まさかここで」と本人は声を漏らしている。思わぬ巡り合わせを抱えて家路についた夜だった。よく歩き、よく学んだ一日だったことが記録されている。',
+        'diary':
+            '七時間の睡眠で迎えた一日は、微分積分の講義から動き出した。午後は課題と読書に費やし、帰路、依頼人はふと路地裏の古本屋に立ち寄ったという。棚を端から目で追っていた指が、一冊で止まる。長く探し続けていた絶版の数学書が、そこに静かに収まっていた。「まさかここで」と本人は声を漏らしている。思わぬ巡り合わせを抱えて家路についた夜だった。よく歩き、よく学んだ一日だったことが記録されている。',
         'answers': {
           'sleep': '7時間',
           'food': 'カフェのサンドイッチ',
@@ -352,7 +364,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 7.0},
       },
       {
-        'diary': '終日の雨。八時間眠った依頼人は、雨音を聞きながらの二度寝という贅沢から一日を始めたという。午後は録りためた番組をゆっくりと消化。これといった予定のない、静かな休日だった。夜になり、本人はかねて気になっていたスパイスからのカレー作りに腰を据える。慣れない計量と火加減に手こずりながらも、台所には次第に本格的な香りが立ち込めていった。「面白かった」と本人。雨の一日を、湯気の向こうで締めくくったことが確認された。',
+        'diary':
+            '終日の雨。八時間眠った依頼人は、雨音を聞きながらの二度寝という贅沢から一日を始めたという。午後は録りためた番組をゆっくりと消化。これといった予定のない、静かな休日だった。夜になり、本人はかねて気になっていたスパイスからのカレー作りに腰を据える。慣れない計量と火加減に手こずりながらも、台所には次第に本格的な香りが立ち込めていった。「面白かった」と本人。雨の一日を、湯気の向こうで締めくくったことが確認された。',
         'answers': {
           'sleep': '8時間',
           'food': 'スパイスから作ったカレー',
@@ -372,7 +385,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 8.0},
       },
       {
-        'diary': '六時間の睡眠で始まった一日は、線形代数の講義と図書館での予習で過ぎていった。夜、依頼人はアルバイト先のカフェに立つ。閉店後、店長から初めてレジ締めを任されたという。売上を数え、帳簿と突き合わせる一連の作業を、同僚に教わりながら最後までやり遂げた。数字がぴたりと合ったとき、信頼されている手応えが胸に残ったらしい。「任せてもらえて嬉しかった」と本人。まかないで腹を満たし、夜道を帰っていったことが記録されている。',
+        'diary':
+            '六時間の睡眠で始まった一日は、線形代数の講義と図書館での予習で過ぎていった。夜、依頼人はアルバイト先のカフェに立つ。閉店後、店長から初めてレジ締めを任されたという。売上を数え、帳簿と突き合わせる一連の作業を、同僚に教わりながら最後までやり遂げた。数字がぴたりと合ったとき、信頼されている手応えが胸に残ったらしい。「任せてもらえて嬉しかった」と本人。まかないで腹を満たし、夜道を帰っていったことが記録されている。',
         'answers': {
           'sleep': '6時間',
           'food': 'アルバイト先のまかない',
@@ -392,7 +406,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 6.0},
       },
       {
-        'diary': '五時間の睡眠で迎えた朝、確率統計の講義までは穏やかに進んでいた。事は午後に起きる。作りかけていたプレゼン資料が、保存の手違いで消えていたという。依頼人は気を取り直し、記憶を頼りに一から組み直す作業へ取りかかった。手は止めず、夕方までに資料はかつての形を取り戻していった。夜には同じことを繰り返さぬよう、クラウドへの自動バックアップを設定したと本人は語っている。教訓を一つ手にした一日だったことが記録されている。',
+        'diary':
+            '五時間の睡眠で迎えた朝、確率統計の講義までは穏やかに進んでいた。事は午後に起きる。作りかけていたプレゼン資料が、保存の手違いで消えていたという。依頼人は気を取り直し、記憶を頼りに一から組み直す作業へ取りかかった。手は止めず、夕方までに資料はかつての形を取り戻していった。夜には同じことを繰り返さぬよう、クラウドへの自動バックアップを設定したと本人は語っている。教訓を一つ手にした一日だったことが記録されている。',
         'answers': {
           'sleep': '5時間',
           'food': '学食のカレー',
@@ -412,7 +427,8 @@ class FirestoreService {
         'numericAnswers': {'sleep': 5.0},
       },
       {
-        'diary': '九時間眠ってもなお、体はまだ本調子ではなかったらしい。喉に違和感を覚えた依頼人は、この日の予定をすべて切り上げ、休養に充てると決めたという。午前はおかゆで胃を温め、午後は録りためていた映画をゆっくりと観て過ごした。動き回らず、ただ体の声に耳を澄ませる一日。夜は早々に床へ入っている。立ち止まることもまた、明日へ向けた支度なのだろう。無理をしなかった一日として記録されている。',
+        'diary':
+            '九時間眠ってもなお、体はまだ本調子ではなかったらしい。喉に違和感を覚えた依頼人は、この日の予定をすべて切り上げ、休養に充てると決めたという。午前はおかゆで胃を温め、午後は録りためていた映画をゆっくりと観て過ごした。動き回らず、ただ体の声に耳を澄ませる一日。夜は早々に床へ入っている。立ち止まることもまた、明日へ向けた支度なのだろう。無理をしなかった一日として記録されている。',
         'answers': {
           'sleep': '9時間',
           'food': 'おかゆ',
@@ -445,24 +461,26 @@ class FirestoreService {
           .collection('entries')
           .doc(dateStr)
           .set({
-        'diary': entry['diary'],
-        'answers': entry['answers'],
-        'numericAnswers': entry['numericAnswers'],
-        'timestamp': FieldValue.serverTimestamp(),
-      });
+            'diary': entry['diary'],
+            'answers': entry['answers'],
+            'numericAnswers': entry['numericAnswers'],
+            'timestamp': FieldValue.serverTimestamp(),
+          });
     }
   }
 
   // 全エントリを日付の降順で返す（CSVエクスポート用）
   Future<List<MapEntry<String, Map<String, dynamic>>>> getAllEntries(
-      String uid) async {
+    String uid,
+  ) async {
     final snap = await _db
         .collection('users')
         .doc(uid)
         .collection('entries')
         .get();
-    final entries =
-        snap.docs.map((doc) => MapEntry(doc.id, doc.data())).toList();
+    final entries = snap.docs
+        .map((doc) => MapEntry(doc.id, doc.data()))
+        .toList();
     entries.sort((a, b) => b.key.compareTo(a.key));
     return entries;
   }
@@ -470,10 +488,7 @@ class FirestoreService {
   // 日記エントリ一覧を取得するクエリを返す
   // ソートはクライアント側でドキュメントID（YYYY-MM-DD）の降順で行う
   Query<Map<String, dynamic>> entriesQuery(String uid) {
-    return _db
-        .collection('users')
-        .doc(uid)
-        .collection('entries');
+    return _db.collection('users').doc(uid).collection('entries');
   }
 
   // 最新のAI所見キャッシュを取得する（未生成なら null を返す）
@@ -497,9 +512,31 @@ class FirestoreService {
         .collection('analyses')
         .doc('latest')
         .set({
-      'text': text,
-      'periodDays': 14,
-      'generatedAt': FieldValue.serverTimestamp(),
-    });
+          'text': text,
+          'periodDays': 14,
+          'generatedAt': FieldValue.serverTimestamp(),
+        });
+  }
+
+  // 今日のAIコメントキャッシュを取得する（未生成なら null を返す）
+  Future<Map<String, dynamic>?> getTodayComment(String uid) async {
+    final doc = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('analyses')
+        .doc('today')
+        .get();
+    if (doc.exists) return doc.data();
+    return null;
+  }
+
+  // 今日のAIコメントを analyses/today に上書き保存する
+  Future<void> saveTodayComment(String uid, String text) async {
+    await _db
+        .collection('users')
+        .doc(uid)
+        .collection('analyses')
+        .doc('today')
+        .set({'text': text, 'generatedAt': FieldValue.serverTimestamp()});
   }
 }
