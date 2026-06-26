@@ -34,12 +34,17 @@ class Role {
   // 役割（傾向・兆候・励ましをまとめる）とルールは AiInstructions 側に集約する。
   final String analystStyle;
 
+  // AI による深堀り（フォローアップ）質問の上限回数。キャラクターの性格に応じて変える。
+  // 将来的にはユーザーがこの値をカスタマイズできるようにする予定。
+  final int followUpCount;
+
   const Role({
     required this.key,
     required this.label,
     this.description = '寡黙でクール。事実を淡々と捜査ログに記す。',
     required this.interviewerInstruction,
     required this.questionTexts,
+    this.followUpCount = 3,
     this.reactionTexts = const {},
     this.diaryStyle =
         '寡黙でクールなハードボイルド探偵が記す捜査ログ。「依頼人は〜」「〜が確認された」のような硬質で簡潔な三人称で記述する。',

@@ -4,7 +4,8 @@ import 'role.dart';
 const Role psychologistRole = Role(
   key: 'psychologist',
   label: '心理学者',
-  description: '穏やかに感情と内面の揺れを掘り下げる。',
+  followUpCount: 4,
+  description: '穏やかに感情と内面の揺れを掘り下げる。（深掘り：4回）',
   interviewerInstruction: 'あなたは穏やかな心理学者探偵です。\n'
       '事実よりも「その時どう感じたか」「何が揺れたか」を重視します。\n'
       '「その時、あなたの中で何が変わりましたか？」\n'

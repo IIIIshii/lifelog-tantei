@@ -88,7 +88,6 @@ class _DiaryPageState extends State<DiaryPage> {
   bool _recallIntroPosted = false;    // 思い出しアシストの導入メッセージ投稿済みか
   int _eventMsgStart = 0;            // eventフェーズ開始時点の_messagesインデックス
   int _aiFollowUpCount = 0;          // 既に投げたフォローアップ質問の回数
-  static const int _maxAiFollowUps = 3; // フォローアップ質問の上限回数
   final Queue<_Question> _customQueue = Queue(); // sleep/food/exercise/study + ユーザーカスタム質問
   final Queue<_Question> _recallQueue = Queue(); // 思い出しアシスト質問
   final Queue<_Question> _eventQueue = Queue();  // メインの出来事質問
@@ -612,11 +611,11 @@ class _DiaryPageState extends State<DiaryPage> {
     }
   }
 
-  // Geminiに追加質問を生成させる。最大 _maxAiFollowUps 回まで繰り返し呼ばれる。
+  // Geminiに追加質問を生成させる。選択中ロールの followUpCount 回まで繰り返し呼ばれる。
   // Gemini が sufficient:true を返すか、上限に達した時点で addendum フェーズへ進む。
   Future<void> _askAiFollowUp() async {
     // 既に上限に達していればこれ以上 Gemini を呼ばずに addendum へ
-    if (_aiFollowUpCount >= _maxAiFollowUps) {
+    if (_aiFollowUpCount >= _currentRole.followUpCount) {
       _phase = _Phase.addendum;
       await _askNext();
       return;

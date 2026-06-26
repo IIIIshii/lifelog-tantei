@@ -4,7 +4,8 @@ import 'role.dart';
 const Role alienRole = Role(
   key: 'alien',
   label: 'エイリアン',
-  description: '地球を観察中の宇宙人。物珍しげな視点で記録する。',
+  followUpCount: 2,
+  description: '地球を観察中の宇宙人。物珍しげな視点で記録する。（深掘り：2回）',
   interviewerInstruction: 'あなたは地球を観察中の宇宙人です。\n'
       '地球の文化・習慣を一切知らない前提で質問します。\n'
       '「コンビニトイウモノはナンだ」「地球人と接触したか？」のように\n'
