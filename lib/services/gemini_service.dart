@@ -19,56 +19,54 @@ class GeminiService {
   final String _role;
 
   GeminiService(String apiKey, String role)
-      : _role = role,
-        _interviewModel = GenerativeModel(
-          model: 'gemini-2.5-flash',
-          apiKey: apiKey,
-          systemInstruction:
-              Content.system(roleFor(role).interviewerInstruction),
-          // 構造化出力: {sufficient: bool, question: string} を強制し、
-          // 「DONE」文字列マッチによる脆い終了判定を廃止する
-          generationConfig: GenerationConfig(
-            responseMimeType: 'application/json',
-            responseSchema: Schema.object(
-              properties: {
-                'sufficient': Schema.boolean(
-                  description: '証言が十分に語られているかどうか',
-                ),
-                'question': Schema.string(
-                  description:
-                      'sufficient が false の場合の深掘り質問。true の場合は空文字でよい',
-                ),
-              },
-              requiredProperties: ['sufficient', 'question'],
-            ),
+    : _role = role,
+      _interviewModel = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: apiKey,
+        systemInstruction: Content.system(roleFor(role).interviewerInstruction),
+        // 構造化出力: {sufficient: bool, question: string} を強制し、
+        // 「DONE」文字列マッチによる脆い終了判定を廃止する
+        generationConfig: GenerationConfig(
+          responseMimeType: 'application/json',
+          responseSchema: Schema.object(
+            properties: {
+              'sufficient': Schema.boolean(description: '証言が十分に語られているかどうか'),
+              'question': Schema.string(
+                description: 'sufficient が false の場合の深掘り質問。true の場合は空文字でよい',
+              ),
+            },
+            requiredProperties: ['sufficient', 'question'],
           ),
         ),
-        _diaryModel = GenerativeModel(
-          model: 'gemini-2.5-flash',
-          apiKey: apiKey,
-          systemInstruction: Content.system(
-              AiInstructions.diaryWriter(roleFor(role).diaryStyle)),
+      ),
+      _diaryModel = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: apiKey,
+        systemInstruction: Content.system(
+          AiInstructions.diaryWriter(roleFor(role).diaryStyle),
         ),
-        _analysisModel = GenerativeModel(
-          model: 'gemini-2.5-flash',
-          apiKey: apiKey,
-          systemInstruction: Content.system(
-              AiInstructions.analyst(roleFor(role).analystStyle)),
+      ),
+      _analysisModel = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: apiKey,
+        systemInstruction: Content.system(
+          AiInstructions.analyst(roleFor(role).analystStyle),
         ),
-        // インタビュアーと同じ人格指示だが、JSON構造化はせずプレーンテキストで相槌を返す
-        _reactionModel = GenerativeModel(
-          model: 'gemini-2.5-flash',
-          apiKey: apiKey,
-          systemInstruction:
-              Content.system(roleFor(role).interviewerInstruction),
-        );
+      ),
+      // インタビュアーと同じ人格指示だが、JSON構造化はせずプレーンテキストで相槌を返す
+      _reactionModel = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: apiKey,
+        systemInstruction: Content.system(roleFor(role).interviewerInstruction),
+      );
 
   // 会話履歴を渡して深掘り質問をGeminiに生成させる。
   // followUpHint を隠し指示として会話履歴に付加し、UIには表示しない。
   // 戻り値の sufficient が true の場合、これ以上の深掘りは不要（呼び出し側で打ち切る）。
   // JSONパースに失敗した場合は安全側に倒し、sufficient:true として扱う。
   Future<({bool sufficient, String question})> generateFollowUp(
-      List<Map<String, String>> messages) async {
+    List<Map<String, String>> messages,
+  ) async {
     final history = _buildHistory(messages);
     final prompt =
         '${AiInstructions.followUpHint(roleFor(_role).interviewerInstruction)}\n\n以下が依頼人の証言です：\n$history';
@@ -110,36 +108,41 @@ class GeminiService {
 
   // 会話履歴から日記テキストをGeminiに生成させる。
   // additionalContext: カスタム質問・思い出しアシストの回答など、追加で含めるコンテキスト
-  Future<String> generateDiary(List<Map<String, String>> messages,
-      {String additionalContext = ''}) async {
+  Future<String> generateDiary(
+    List<Map<String, String>> messages, {
+    String additionalContext = '',
+  }) async {
     final history = _buildHistory(messages);
-    final prompt = DiaryPrompts.buildDiaryPrompt(history,
-        additionalContext: additionalContext);
-    final response = await _diaryModel.generateContent([
-      Content.text(prompt),
-    ]);
+    final prompt = DiaryPrompts.buildDiaryPrompt(
+      history,
+      additionalContext: additionalContext,
+    );
+    final response = await _diaryModel.generateContent([Content.text(prompt)]);
     return response.text?.trim() ?? '日記を生成できませんでした。';
   }
 
   // 既存の日記と追記インタビューの会話を統合して日記テキストをGeminiに生成させる
   // additionalContext: カスタム質問・思い出しアシストの回答など、追加で含めるコンテキスト
   Future<String> generateDiaryWithExisting(
-      String existingDiary, List<Map<String, String>> messages,
-      {String additionalContext = ''}) async {
+    String existingDiary,
+    List<Map<String, String>> messages, {
+    String additionalContext = '',
+  }) async {
     final history = _buildHistory(messages);
     final prompt = DiaryPrompts.buildDiaryWithExistingPrompt(
-        existingDiary, history,
-        additionalContext: additionalContext);
-    final response = await _diaryModel.generateContent([
-      Content.text(prompt),
-    ]);
+      existingDiary,
+      history,
+      additionalContext: additionalContext,
+    );
+    final response = await _diaryModel.generateContent([Content.text(prompt)]);
     return response.text?.trim() ?? '日記を生成できませんでした。';
   }
 
   // 直近のエントリ群（日付→データ）から所見テキストをGeminiに生成させる。
   // 呼び出し側は FirestoreService.getRecentEntries の戻り値をそのまま渡せる。
   Future<String> generateAnalysis(
-      List<MapEntry<String, Map<String, dynamic>>> entries) async {
+    List<MapEntry<String, Map<String, dynamic>>> entries,
+  ) async {
     final prompt = DiaryPrompts.buildAnalysisPrompt(entries);
     final response = await _analysisModel.generateContent([
       Content.text(prompt),
@@ -150,8 +153,22 @@ class GeminiService {
   // メッセージリストを「探偵: ...」「依頼人: ...」形式の文字列に変換する
   String _buildHistory(List<Map<String, String>> messages) {
     return messages
-        .map((m) =>
-            '${m['role'] == 'ai' ? '探偵' : '依頼人'}: ${m['text']}')
+        .map((m) => '${m['role'] == 'ai' ? '探偵' : '依頼人'}: ${m['text']}')
         .join('\n');
+  }
+
+  // 今日のエントリと直近14日分からコメントテキストをGeminiに生成させる。
+  Future<String> generateDailyComment(
+    Map<String, dynamic> todayEntry,
+    List<MapEntry<String, Map<String, dynamic>>> recentEntries,
+  ) async {
+    final prompt = DiaryPrompts.buildDailyCommentPrompt(
+      todayEntry,
+      recentEntries,
+    );
+    final response = await _analysisModel.generateContent([
+      Content.text(prompt),
+    ]);
+    return response.text?.trim() ?? 'コメントを生成できませんでした。';
   }
 }
