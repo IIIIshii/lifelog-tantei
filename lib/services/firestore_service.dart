@@ -80,19 +80,22 @@ class FirestoreService {
 
   // 質問キー→回答テキストのマップをFirestoreに保存する（既存データとマージする）
   // numericAnswers が渡された場合は数値データも同時に保存する
+  // skippedKeys が渡された場合は「質問したが未回答（スキップ）」のキー一覧も保存する
   Future<void> saveAnswers(
-    String uid,
-    String date,
-    Map<String, String> answers, {
-    Map<String, double>? numericAnswers,
-  }) async {
-    if (answers.isEmpty && (numericAnswers == null || numericAnswers.isEmpty)) {
+      String uid, String date, Map<String, String> answers,
+      {Map<String, double>? numericAnswers, List<String>? skippedKeys}) async {
+    if (answers.isEmpty &&
+        (numericAnswers == null || numericAnswers.isEmpty) &&
+        (skippedKeys == null || skippedKeys.isEmpty)) {
       return;
     }
     final data = <String, dynamic>{};
     if (answers.isNotEmpty) data['answers'] = answers;
     if (numericAnswers != null && numericAnswers.isNotEmpty) {
       data['numericAnswers'] = numericAnswers;
+    }
+    if (skippedKeys != null && skippedKeys.isNotEmpty) {
+      data['skipped'] = skippedKeys;
     }
     await _db
         .collection('users')
