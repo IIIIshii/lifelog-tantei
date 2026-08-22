@@ -75,6 +75,9 @@ class _DiaryPageState extends State<DiaryPage> {
   // スキップ済みイベント質問の_messagesインデックス（Gemini除外用）。
   // イベント質問とその「（スキップ）」吹き出しの両方を登録する。
   final Set<int> _skippedMsgIndices = {};
+  // このindex未満の_messagesはタイプライター表示を終えている。
+  // 未満のものは素のTextで描画されるため、スクロールで再生し直されることがない。
+  int _animatedUpTo = 0;
 
   final ScrollController _scrollController = ScrollController();
 
@@ -867,6 +870,8 @@ class _DiaryPageState extends State<DiaryPage> {
         // eventフェーズ以前のメッセージを保持し、それ以降をリセット
         setState(() {
           _messages.removeRange(_eventMsgStart, _messages.length);
+          // 残った発言は表示済み扱いにする（削除で index がずれても再生させない）
+          _animatedUpTo = _messages.length;
           _diary = null;
           _diaryGenerated = false;
           _pendingKey = null;
@@ -1117,9 +1122,20 @@ class _DiaryPageState extends State<DiaryPage> {
   @override
   Widget build(BuildContext context) {
     final lastIsAI = _messages.isNotEmpty && _messages.last['role'] == 'ai';
-    final showChoices =
-        !_diaryGenerated &&
+    // 未表示のAI発言のうち最も古い1件だけをタイプさせる。
+    // リアクションと次の質問のようにAI発言が連続しても、1件ずつ順に再生される。
+    int? typingIndex;
+    for (var i = _animatedUpTo; i < _messages.length; i++) {
+      if (_messages[i]['role'] == 'ai') {
+        typingIndex = i;
+        break;
+      }
+    }
+    // タイプ中は回答手段を出さない（質問が出きる前に答えられてしまわないように）
+    final isTyping = typingIndex != null;
+    final showChoices = !_diaryGenerated &&
         !_isLoading &&
+        !isTyping &&
         lastIsAI &&
         _currentChoices != null &&
         _phase != _Phase.diaryView &&
@@ -1128,6 +1144,7 @@ class _DiaryPageState extends State<DiaryPage> {
     final showInput =
         !_diaryGenerated &&
         !_isLoading &&
+        !isTyping &&
         lastIsAI &&
         _currentChoices == null &&
         _phase != _Phase.diaryView &&
@@ -1194,7 +1211,17 @@ class _DiaryPageState extends State<DiaryPage> {
                   return DiaryCard(diary: _diary!);
                 }
                 final msg = _messages[index];
-                return MessageBubble(role: msg['role']!, text: msg['text']!);
+                return MessageBubble(
+                  role: msg['role']!,
+                  text: msg['text']!,
+                  animate: index == typingIndex,
+                  onAnimationFinished: () {
+                    if (!mounted) return;
+                    setState(() => _animatedUpTo = index + 1);
+                    // 選択肢・入力欄が出た分だけ伸びた高さに追従する
+                    _scrollToBottom();
+                  },
+                );
               },
             ),
           ),
@@ -1205,7 +1232,7 @@ class _DiaryPageState extends State<DiaryPage> {
               child: CircularProgressIndicator(color: c.gold),
             ),
           // 追記 / 作り直し / 確認の選択肢ボタン（ラベルが長いため縦並び）
-          if (_showExistingDiaryChoice && !_isLoading)
+          if (_showExistingDiaryChoice && !_isLoading && !isTyping)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Column(
