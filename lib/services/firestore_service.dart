@@ -82,8 +82,12 @@ class FirestoreService {
   // numericAnswers が渡された場合は数値データも同時に保存する
   // skippedKeys が渡された場合は「質問したが未回答（スキップ）」のキー一覧も保存する
   Future<void> saveAnswers(
-      String uid, String date, Map<String, String> answers,
-      {Map<String, double>? numericAnswers, List<String>? skippedKeys}) async {
+    String uid,
+    String date,
+    Map<String, String> answers, {
+    Map<String, double>? numericAnswers,
+    List<String>? skippedKeys,
+  }) async {
     if (answers.isEmpty &&
         (numericAnswers == null || numericAnswers.isEmpty) &&
         (skippedKeys == null || skippedKeys.isEmpty)) {
@@ -127,11 +131,23 @@ class FirestoreService {
   }
 
   // 生成した日記テキストをFirestoreに保存する（既存データとマージする）
-  Future<void> saveDiary(String uid, String date, String diary) async {
-    await _db.collection('users').doc(uid).collection('entries').doc(date).set({
+  Future<void> saveDiary(
+    String uid,
+    String date,
+    String diary, {
+    String? mode,
+  }) async {
+    final data = <String, dynamic>{
       'diary': diary,
       'timestamp': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    };
+    if (mode != null) data['diaryMode'] = mode;
+    await _db
+        .collection('users')
+        .doc(uid)
+        .collection('entries')
+        .doc(date)
+        .set(data, SetOptions(merge: true));
   }
 
   // デモ用のモックデータを14日分Firestoreに書き込む。
