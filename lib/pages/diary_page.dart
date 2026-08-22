@@ -23,16 +23,18 @@ import 'diary_edit_page.dart';
 // confirm      : 「これでいいですか？」の確認ステップ（ボタンUI）
 // done         : 全質問完了・日記生成待ち
 enum _Phase {
-  custom,      // sleep/food/exercise/study + ユーザーカスタム質問
+  startSelect, // 通常フロー / 何もなかった分岐の入口
+  emptyDaySelect, // 「何もなかった…」後の短縮ルート選択
+  custom, // sleep/food/exercise/study + ユーザーカスタム質問
   customSaved, // カスタム質問回答後「日記に追加しますか？」
-  recall,      // 思い出しアシスト（設定ONのみ）
+  recall, // 思い出しアシスト（設定ONのみ）
   recallSaved, // 思い出しアシスト後「日記に追加しますか？」
-  modeSelect,  // 「質問に沿って作成 / 自分で入力」
-  event,       // メインの出来事質問
-  aiFollowUp,  // AIによる追加質問
-  addendum,    // 追記事項
-  diaryView,   // 日記確認（これを記録/編集/生成しなおす/はじめから）
-  done,        // 完了
+  modeSelect, // 「質問に沿って作成 / 自分で入力」
+  event, // メインの出来事質問
+  aiFollowUp, // AIによる追加質問
+  addendum, // 追記事項
+  diaryView, // 日記確認（これを記録/編集/生成しなおす/はじめから）
+  done, // 完了
 }
 
 // 1つの質問を表すデータクラス
@@ -63,7 +65,7 @@ class _DiaryPageState extends State<DiaryPage> {
   bool _isLoading = false;
   bool _diaryGenerated = false;
   bool _showExistingDiaryChoice = false; // 追記 or 確認の選択肢を表示するフラグ
-  bool _viewingExisting = false;         // 既存日記を「確認する」で表示中か
+  bool _viewingExisting = false; // 既存日記を「確認する」で表示中か
   final TextEditingController _textController = TextEditingController();
   List<String>? _currentChoices; // 現在表示中の選択肢。nullのときはテキスト入力を表示
   String? _pendingKey; // 直前のAI質問のキー（次のユーザー回答をanswersに紐づけるため）
@@ -80,17 +82,22 @@ class _DiaryPageState extends State<DiaryPage> {
   late final String _apiKey;
   final FirestoreService _firestore = FirestoreService();
 
-  _Phase _phase = _Phase.custom;
-  bool _includeCustomInDiary = true;  // カスタム質問の回答を日記生成に含めるか
-  bool _includeRecallInDiary = true;  // 思い出しアシストの回答を日記生成に含めるか
-  bool _hasRecallAssist = false;      // 思い出しアシストが設定ONか
-  bool _customIntroPosted = false;    // カスタム質問の導入メッセージ投稿済みか
-  bool _recallIntroPosted = false;    // 思い出しアシストの導入メッセージ投稿済みか
-  int _eventMsgStart = 0;            // eventフェーズ開始時点の_messagesインデックス
-  int _aiFollowUpCount = 0;          // 既に投げたフォローアップ質問の回数
-  final Queue<_Question> _customQueue = Queue(); // sleep/food/exercise/study + ユーザーカスタム質問
+  _Phase _phase = _Phase.startSelect;
+  bool _includeCustomInDiary = true; // カスタム質問の回答を日記生成に含めるか
+  bool _includeRecallInDiary = true; // 思い出しアシストの回答を日記生成に含めるか
+  bool _lifeLogOnly = false; // 固定質問だけ記録して空の日記で終えるモード
+  bool _memoryAssistMode = false; // 過去ログから作った質問で日記を書くモード
+  String? _diaryMode; // Firestoreへ保存する作成モードのメタデータ
+  bool _hasRecallAssist = false; // 思い出しアシストが設定ONか
+  bool _customIntroPosted = false; // カスタム質問の導入メッセージ投稿済みか
+  bool _recallIntroPosted = false; // 思い出しアシストの導入メッセージ投稿済みか
+  int _eventMsgStart = 0; // eventフェーズ開始時点の_messagesインデックス
+  int _aiFollowUpCount = 0; // 既に投げたフォローアップ質問の回数
+  final Queue<_Question> _customQueue =
+      Queue(); // sleep/food/exercise/study + ユーザーカスタム質問
   final Queue<_Question> _recallQueue = Queue(); // 思い出しアシスト質問
-  final Queue<_Question> _eventQueue = Queue();  // メインの出来事質問
+  final Queue<_Question> _eventQueue = Queue(); // メインの出来事質問
+  final List<String> _memoryQuestions = []; // 過去ログから生成した質問
 
   // 選択中の探偵ロール。質問文・ナレーションの文面はこのロール定義から引く。
   // 設定値（selectedRole）が未知でも roleFor() がデフォルトロールへフォールバックする。
@@ -98,8 +105,6 @@ class _DiaryPageState extends State<DiaryPage> {
 
   int _totalQuestions = 0;
   int _answeredQuestionCount = 0;
-
-
 
   // メインの出来事質問リスト（key→ロール定義の文面、無ければここの text をデフォルトに使う）
   static const List<_Question> _eventQuestions = [
@@ -113,15 +118,8 @@ class _DiaryPageState extends State<DiaryPage> {
       choices: ['自宅', '学校', '職場', 'その他(自由記述)'],
       key: 'event_where',
     ),
-    _Question(
-      '誰に関わる話だ？',
-      choices: ['自分', 'その他(自由記述)'],
-      key: 'event_who',
-    ),
-    _Question(
-      '何があった？話してくれ。',
-      key: 'event_what',
-    ),
+    _Question('誰に関わる話だ？', choices: ['自分', 'その他(自由記述)'], key: 'event_who'),
+    _Question('何があった？話してくれ。', key: 'event_what'),
     _Question(
       'そのとき、どう感じた？',
       choices: ['嬉しかった', '面白かった', '悲しかった', '怒った', 'その他(自由記述)'],
@@ -155,7 +153,12 @@ class _DiaryPageState extends State<DiaryPage> {
         _conversationOrder = await _firestore.getMessageCount(_uid!, _today!);
         const message = '今日の事件簿はすでに存在する。どうするつもりだ？';
         await _firestore.saveMessage(
-            _uid!, _today!, 'ai', message, _conversationOrder++);
+          _uid!,
+          _today!,
+          'ai',
+          message,
+          _conversationOrder++,
+        );
         setState(() {
           _existingDiary = existingDiary;
           _messages.add({'role': 'ai', 'text': message});
@@ -180,7 +183,12 @@ class _DiaryPageState extends State<DiaryPage> {
   // 既存の日記がある場合の選択肢（追記 or 確認）を処理する
   Future<void> _handleExistingDiaryChoice(String choice) async {
     await _firestore.saveMessage(
-        _uid!, _today!, 'user', choice, _conversationOrder++);
+      _uid!,
+      _today!,
+      'user',
+      choice,
+      _conversationOrder++,
+    );
     setState(() {
       _showExistingDiaryChoice = false;
       _messages.add({'role': 'user', 'text': choice});
@@ -237,47 +245,76 @@ class _DiaryPageState extends State<DiaryPage> {
     // ── カスタム質問キュー（sleep/food/exercise/study + ユーザー定義）──
     // 質問文はロール定義から引く（未定義キーは第2引数のデフォルト文を使う）。
     if (settings.recordSleep) {
-      _customQueue.add(_Question(
-        _currentRole.text('q_sleep', '昨夜は何時間眠った？'),
-        choices: const [
-          '〜4時間', '4.5時間', '5時間', '5.5時間', '6時間', '6.5時間',
-          '7時間', '7.5時間', '8時間', '8.5時間', '9時間', '9.5時間',
-          '10時間', '10.5時間', '11時間', '11.5時間', '12時間', '12.5時間',
-          '13時間〜', 'カスタム',
-        ],
-        key: 'sleep',
-      ));
+      _customQueue.add(
+        _Question(
+          _currentRole.text('q_sleep', '昨夜は何時間眠った？'),
+          choices: const [
+            '〜4時間',
+            '4.5時間',
+            '5時間',
+            '5.5時間',
+            '6時間',
+            '6.5時間',
+            '7時間',
+            '7.5時間',
+            '8時間',
+            '8.5時間',
+            '9時間',
+            '9.5時間',
+            '10時間',
+            '10.5時間',
+            '11時間',
+            '11.5時間',
+            '12時間',
+            '12.5時間',
+            '13時間〜',
+            'カスタム',
+          ],
+          key: 'sleep',
+        ),
+      );
     }
     if (settings.recordFood) {
       _customQueue.add(
-          _Question(_currentRole.text('q_food', '今日、何を口にした？'), key: 'food'));
+        _Question(_currentRole.text('q_food', '今日、何を口にした？'), key: 'food'),
+      );
     }
     if (settings.recordExercise) {
-      _customQueue.add(_Question(
-        _currentRole.text('q_exercise', '身体を動かしたか？'),
-        choices: const ['した', 'していない'],
-        key: 'exercise',
-      ));
+      _customQueue.add(
+        _Question(
+          _currentRole.text('q_exercise', '身体を動かしたか？'),
+          choices: const ['した', 'していない'],
+          key: 'exercise',
+        ),
+      );
     }
     if (settings.recordStudy) {
-      _customQueue.add(_Question(
-        _currentRole.text('q_study', '今日、頭を使う作業はしたか？'),
-        choices: const ['した', 'していない'],
-        key: 'study',
-      ));
+      _customQueue.add(
+        _Question(
+          _currentRole.text('q_study', '今日、頭を使う作業はしたか？'),
+          choices: const ['した', 'していない'],
+          key: 'study',
+        ),
+      );
     }
     for (var i = 0; i < settings.customQuestions.length; i++) {
-      _customQueue.add(_Question(settings.customQuestions[i], key: 'custom_$i'));
+      _customQueue.add(
+        _Question(settings.customQuestions[i], key: 'custom_$i'),
+      );
     }
 
     // ── 思い出しアシストキュー ──
     _hasRecallAssist = settings.recallAssist;
     if (settings.recallAssist) {
       _recallQueue.addAll([
-        _Question(_currentRole.text('q_morning', '午前中の動向を報告してくれ。'),
-            key: 'morning'),
-        _Question(_currentRole.text('q_afternoon', '午後はどう動いた？'),
-            key: 'afternoon'),
+        _Question(
+          _currentRole.text('q_morning', '午前中の動向を報告してくれ。'),
+          key: 'morning',
+        ),
+        _Question(
+          _currentRole.text('q_afternoon', '午後はどう動いた？'),
+          key: 'afternoon',
+        ),
         _Question(_currentRole.text('q_evening', '夜の動向は？'), key: 'evening'),
       ]);
     }
@@ -288,11 +325,10 @@ class _DiaryPageState extends State<DiaryPage> {
     _calcTotalQuestions();
   }
 
-
   void _calcTotalQuestions() {
-    _totalQuestions = _customQueue.length + _recallQueue.length + _eventQueue.length;
+    _totalQuestions =
+        _customQueue.length + _recallQueue.length + _eventQueue.length;
   }
-
 
   // _eventQuestions をキューに積む。ロール定義の質問文があれば text を差し替え、
   // 無ければ元の text をデフォルトとして使う。choices・key は保持する。
@@ -311,7 +347,21 @@ class _DiaryPageState extends State<DiaryPage> {
   // 現在のフェーズに応じて次の質問をする
   Future<void> _askNext() async {
     switch (_phase) {
+      case _Phase.startSelect:
+        _postAiMessage('今日の事件簿を作成する。どうする？', choices: ['いつも通りはじめる', '何もなかった…']);
+      case _Phase.emptyDaySelect:
+        _postAiMessage(
+          '何もなかった日として扱うか、それとも手がかりを探すか。選んでくれ。',
+          choices: ['今日はこれで終わる', '生活の記録だけつける', '探偵といっしょに今日を思い出す'],
+        );
       case _Phase.custom:
+        if (_lifeLogOnly && _customQueue.isEmpty) {
+          await _finishWithEmptyDiary(
+            mode: 'life_log_only',
+            message: '生活の記録だけ保管した。今日はここまででいい。',
+          );
+          return;
+        }
         if (_customQueue.isEmpty && !_customIntroPosted) {
           // カスタム質問が1つもない場合はrecallへスキップ
           _phase = _Phase.recall;
@@ -330,17 +380,28 @@ class _DiaryPageState extends State<DiaryPage> {
           final q = _customQueue.removeFirst();
           _postAiMessage(q.text, choices: q.choices, key: q.key);
         } else {
+          if (_lifeLogOnly) {
+            await _finishWithEmptyDiary(
+              mode: 'life_log_only',
+              message: '生活の記録だけ保管した。今日はここまででいい。',
+            );
+            return;
+          }
           _phase = _Phase.customSaved;
           await _askNext();
         }
       case _Phase.customSaved:
-        final hasCustomAnswers = _answers.keys.any((k) =>
-            ['sleep', 'food', 'exercise', 'study'].contains(k) ||
-            k.startsWith('custom_'));
+        final hasCustomAnswers = _answers.keys.any(
+          (k) =>
+              ['sleep', 'food', 'exercise', 'study'].contains(k) ||
+              k.startsWith('custom_'),
+        );
         if (hasCustomAnswers) {
           _postAiMessage(
-            _currentRole.text('confirm_include',
-                '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？'),
+            _currentRole.text(
+              'confirm_include',
+              '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？',
+            ),
             choices: ['はい', 'いいえ'],
           );
         } else {
@@ -356,8 +417,9 @@ class _DiaryPageState extends State<DiaryPage> {
         if (!_recallIntroPosted) {
           _recallIntroPosted = true;
           _postAiMessage(
-              _currentRole.text('intro_recall', '今日一日の行動を洗いざらい話してもらおう。'),
-              choices: ['次へ']);
+            _currentRole.text('intro_recall', '今日一日の行動を洗いざらい話してもらおう。'),
+            choices: ['次へ'],
+          );
           return;
         }
         if (_recallQueue.isNotEmpty) {
@@ -369,20 +431,24 @@ class _DiaryPageState extends State<DiaryPage> {
         }
       case _Phase.recallSaved:
         _postAiMessage(
-          _currentRole.text('confirm_include',
-              '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？'),
+          _currentRole.text(
+            'confirm_include',
+            '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？',
+          ),
           choices: ['はい', 'いいえ'],
         );
       case _Phase.modeSelect:
-        _postAiMessage(
-          '今日の事件簿を作成する。どうする？',
-          choices: ['質問に沿って作成', '自分で入力'],
-        );
+        _postAiMessage('今日の事件簿を作成する。どうする？', choices: ['質問に沿って作成', '自分で入力']);
       case _Phase.event:
         if (_eventQueue.isNotEmpty) {
           final q = _eventQueue.removeFirst();
           _postAiMessage(q.text, choices: q.choices, key: q.key);
         } else {
+          if (_memoryAssistMode) {
+            _phase = _Phase.addendum;
+            await _askNext();
+            return;
+          }
           _phase = _Phase.aiFollowUp;
           await _askAiFollowUp();
         }
@@ -427,7 +493,12 @@ class _DiaryPageState extends State<DiaryPage> {
     // 「その他(自由記述)」「カスタム」選択時はフリーテキスト入力に切り替える（回答はまだ記録しない）
     if ((text == 'その他(自由記述)' || text == 'カスタム') && _pendingKey != null) {
       await _firestore.saveMessage(
-          _uid!, _today!, 'user', text, _conversationOrder++);
+        _uid!,
+        _today!,
+        'user',
+        text,
+        _conversationOrder++,
+      );
       setState(() => _messages.add({'role': 'user', 'text': text}));
       _postAiMessage('具体的に教えてください。', key: _pendingKey);
       return;
@@ -447,11 +518,35 @@ class _DiaryPageState extends State<DiaryPage> {
     }
 
     await _firestore.saveMessage(
-        _uid!, _today!, 'user', text, _conversationOrder++);
+      _uid!,
+      _today!,
+      'user',
+      text,
+      _conversationOrder++,
+    );
     setState(() => _messages.add({'role': 'user', 'text': text}));
     _scrollToBottom();
 
     switch (_phase) {
+      case _Phase.startSelect:
+        if (text == '何もなかった…') {
+          _phase = _Phase.emptyDaySelect;
+        } else {
+          _phase = _Phase.custom;
+          _diaryMode = null;
+        }
+        await _askNext();
+      case _Phase.emptyDaySelect:
+        if (text == '今日はこれで終わる') {
+          await _finishWithEmptyDiary(
+            mode: 'empty_day',
+            message: '了解した。今日は空の事件簿として保管しておく。',
+          );
+        } else if (text == '生活の記録だけつける') {
+          await _startLifeLogOnly();
+        } else if (text == '探偵といっしょに今日を思い出す') {
+          await _startMemoryAssist();
+        }
       case _Phase.custom:
         await _maybeReact(wasChoice, answeredKey, text);
         await _askNext();
@@ -472,7 +567,9 @@ class _DiaryPageState extends State<DiaryPage> {
           _eventMsgStart = _messages.length;
           _postAiMessage(
             _currentRole.text(
-                'intro_event', '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？'),
+              'intro_event',
+              '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
+            ),
             choices: ['次へ'],
           );
         } else {
@@ -543,7 +640,12 @@ class _DiaryPageState extends State<DiaryPage> {
 
     // 継続性のためユーザー側に「（スキップ）」吹き出しを表示する
     await _firestore.saveMessage(
-        _uid!, _today!, 'user', '（スキップ）', _conversationOrder++);
+      _uid!,
+      _today!,
+      'user',
+      '（スキップ）',
+      _conversationOrder++,
+    );
     setState(() => _messages.add({'role': 'user', 'text': '（スキップ）'}));
     _scrollToBottom();
 
@@ -562,10 +664,94 @@ class _DiaryPageState extends State<DiaryPage> {
         await _generateDiary();
       case _Phase.customSaved:
       case _Phase.recallSaved:
+      case _Phase.startSelect:
+      case _Phase.emptyDaySelect:
       case _Phase.modeSelect:
       case _Phase.diaryView:
       case _Phase.done:
         break; // これらのフェーズはキー付き質問ではないためスキップ対象外
+    }
+  }
+
+  Future<void> _startLifeLogOnly() async {
+    setState(() {
+      _lifeLogOnly = true;
+      _memoryAssistMode = false;
+      _diaryMode = 'life_log_only';
+      _phase = _Phase.custom;
+      _includeCustomInDiary = false;
+      _includeRecallInDiary = false;
+      _totalQuestions = _customQueue.length;
+      _answeredQuestionCount = 0;
+    });
+    await _askNext();
+  }
+
+  Future<void> _startMemoryAssist() async {
+    setState(() => _isLoading = true);
+    try {
+      final entries = await _firestore.getRecentEntries(_uid!, 14);
+      final questions = await _gemini.generateMemoryQuestions(entries);
+      _memoryQuestions
+        ..clear()
+        ..addAll(questions);
+      _eventQueue.clear();
+      _enqueueMemoryQuestions();
+      setState(() {
+        _lifeLogOnly = false;
+        _memoryAssistMode = true;
+        _diaryMode = 'memory_assist';
+        _phase = _Phase.event;
+        _eventMsgStart = _messages.length;
+        _totalQuestions = _eventQueue.length;
+        _answeredQuestionCount = 0;
+      });
+      _postAiMessage('過去2週間の事件簿を読み返した。手がかりになりそうなことから聞いていく。', choices: ['次へ']);
+    } catch (e) {
+      _showError('質問生成エラー: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _scrollToBottom();
+      }
+    }
+  }
+
+  void _enqueueMemoryQuestions() {
+    for (var i = 0; i < _memoryQuestions.length; i++) {
+      _eventQueue.add(_Question(_memoryQuestions[i], key: 'memory_$i'));
+    }
+  }
+
+  Future<void> _finishWithEmptyDiary({
+    required String mode,
+    required String message,
+  }) async {
+    setState(() => _isLoading = true);
+    try {
+      await Future.wait([
+        _firestore.saveDiary(_uid!, _today!, '', mode: mode),
+        _firestore.saveAnswers(
+          _uid!,
+          _today!,
+          _answers,
+          numericAnswers: _numericAnswers,
+          skippedKeys: _skippedKeys.toList(),
+        ),
+      ]);
+      _postAiMessage(message);
+      setState(() {
+        _diary = '';
+        _diaryGenerated = true;
+        _phase = _Phase.done;
+      });
+    } catch (e) {
+      _showError('保存エラー: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _scrollToBottom();
+      }
     }
   }
 
@@ -575,7 +761,10 @@ class _DiaryPageState extends State<DiaryPage> {
   // - 自由記述（wasChoice=false）: Gemini に短い相槌を生成させて表示（失敗時はスキップ）
   // answeredKey が null（「次へ」等の導入・ナビ用ボタン）の場合は何もしない。
   Future<void> _maybeReact(
-      bool wasChoice, String? answeredKey, String answer) async {
+    bool wasChoice,
+    String? answeredKey,
+    String answer,
+  ) async {
     if (answeredKey == null) return;
     // リアクション対象は実質的な質問フェーズのみ（確認・モード選択・追記等は対象外）
     if (_phase != _Phase.custom &&
@@ -631,7 +820,12 @@ class _DiaryPageState extends State<DiaryPage> {
       }
       _aiFollowUpCount++;
       await _firestore.saveMessage(
-          _uid!, _today!, 'ai', result.question, _conversationOrder++);
+        _uid!,
+        _today!,
+        'ai',
+        result.question,
+        _conversationOrder++,
+      );
       setState(() {
         _messages.add({'role': 'ai', 'text': result.question});
         _pendingKey = 'ai_followup_$_aiFollowUpCount';
@@ -651,8 +845,7 @@ class _DiaryPageState extends State<DiaryPage> {
       case 'これを記録':
         // 日記はすでに_generateDiary()で保存済み。完了メッセージを投稿してdoneへ
         setState(() => _phase = _Phase.done);
-        _postAiMessage(
-            '以上だ。事件簿はアーカイブに保管した。');
+        _postAiMessage('以上だ。事件簿はアーカイブに保管した。');
       case '編集する':
         if (mounted) {
           Navigator.push(
@@ -682,21 +875,37 @@ class _DiaryPageState extends State<DiaryPage> {
           _aiFollowUpCount = 0; // フォローアップ回数もリセット
         });
         // event関連の回答・スキップ記録をクリアしてキューを再構築
-        _answers.removeWhere((k, _) =>
-            k.startsWith('event_') ||
-            k.startsWith('ai_followup') ||
-            k == 'addendum');
-        _skippedKeys.removeWhere((k) =>
-            k.startsWith('event_') ||
-            k.startsWith('ai_followup') ||
-            k == 'addendum');
+        _answers.removeWhere(
+          (k, _) =>
+              k.startsWith('event_') ||
+              k.startsWith('memory_') ||
+              k.startsWith('ai_followup') ||
+              k == 'addendum',
+        );
+        _skippedKeys.removeWhere(
+          (k) =>
+              k.startsWith('event_') ||
+              k.startsWith('memory_') ||
+              k.startsWith('ai_followup') ||
+              k == 'addendum',
+        );
         // _messagesは_eventMsgStart以降をremoveRangeするためevent範囲のindexは全クリアでよい
         _skippedMsgIndices.clear();
         _eventQueue.clear();
-        _enqueueEventQuestions();
+        if (_memoryAssistMode) {
+          _enqueueMemoryQuestions();
+        } else {
+          _enqueueEventQuestions();
+        }
+        _totalQuestions = _eventQueue.length;
+        _answeredQuestionCount = 0;
         _postAiMessage(
-          _currentRole.text(
-              'intro_event', '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？'),
+          _memoryAssistMode
+              ? 'もう一度、手がかりを拾い直す。'
+              : _currentRole.text(
+                  'intro_event',
+                  '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
+                ),
           choices: ['次へ'],
         );
     }
@@ -738,15 +947,23 @@ class _DiaryPageState extends State<DiaryPage> {
       final additionalContext = _buildAdditionalContext();
       final diary = _existingDiary != null
           ? await _gemini.generateDiaryWithExisting(
-              _existingDiary!, eventMessages,
-              additionalContext: additionalContext)
-          : await _gemini.generateDiary(eventMessages,
-              additionalContext: additionalContext);
+              _existingDiary!,
+              eventMessages,
+              additionalContext: additionalContext,
+            )
+          : await _gemini.generateDiary(
+              eventMessages,
+              additionalContext: additionalContext,
+            );
       await Future.wait([
-        _firestore.saveDiary(_uid!, _today!, diary),
-        _firestore.saveAnswers(_uid!, _today!, _answers,
-            numericAnswers: _numericAnswers,
-            skippedKeys: _skippedKeys.toList()),
+        _firestore.saveDiary(_uid!, _today!, diary, mode: _diaryMode),
+        _firestore.saveAnswers(
+          _uid!,
+          _today!,
+          _answers,
+          numericAnswers: _numericAnswers,
+          skippedKeys: _skippedKeys.toList(),
+        ),
       ]);
       _postAiMessage('事件簿を作成した。確認してくれ。');
       setState(() {
@@ -777,14 +994,15 @@ class _DiaryPageState extends State<DiaryPage> {
       ),
       child: DropdownButton<String>(
         value: null,
-        hint: Text('選択してください',
-            style: TextStyle(color: c.appBarSubtitle)),
+        hint: Text('選択してください', style: TextStyle(color: c.appBarSubtitle)),
         isExpanded: true,
         underline: const SizedBox.shrink(),
         dropdownColor: c.appBarBg,
         style: TextStyle(color: c.appBarFg),
         items: choices
-            .map((choice) => DropdownMenuItem(value: choice, child: Text(choice)))
+            .map(
+              (choice) => DropdownMenuItem(value: choice, child: Text(choice)),
+            )
             .toList(),
         onChanged: (val) {
           if (val != null) _sendUserReply(val);
@@ -810,6 +1028,30 @@ class _DiaryPageState extends State<DiaryPage> {
             ),
           ),
           child: Text(choice),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildStackedChoiceButtons(List<String> choices) {
+    final c = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: choices.map((choice) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: ElevatedButton(
+            onPressed: () => _sendUserReply(choice),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: c.gold,
+              foregroundColor: c.appBarFg,
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+            ),
+            child: Text(choice, textAlign: TextAlign.center),
+          ),
         );
       }).toList(),
     );
@@ -864,8 +1106,9 @@ class _DiaryPageState extends State<DiaryPage> {
         content: SelectableText(message),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
@@ -874,14 +1117,16 @@ class _DiaryPageState extends State<DiaryPage> {
   @override
   Widget build(BuildContext context) {
     final lastIsAI = _messages.isNotEmpty && _messages.last['role'] == 'ai';
-    final showChoices = !_diaryGenerated &&
+    final showChoices =
+        !_diaryGenerated &&
         !_isLoading &&
         lastIsAI &&
         _currentChoices != null &&
         _phase != _Phase.diaryView &&
         _phase != _Phase.done;
     // diaryView・done・選択肢表示中はテキスト入力を非表示にする
-    final showInput = !_diaryGenerated &&
+    final showInput =
+        !_diaryGenerated &&
         !_isLoading &&
         lastIsAI &&
         _currentChoices == null &&
@@ -890,7 +1135,9 @@ class _DiaryPageState extends State<DiaryPage> {
     // スキップボタンは回答対象の質問（キー付き）が表示中のときだけ出す。
     // 導入・確認・モード選択ボタン（キーなし）には出さない。
     final canSkip =
-        (showChoices || showInput) && _pendingKey != null && !_showExistingDiaryChoice;
+        (showChoices || showInput) &&
+        _pendingKey != null &&
+        !_showExistingDiaryChoice;
 
     final c = context.colors;
     return Scaffold(
@@ -906,12 +1153,17 @@ class _DiaryPageState extends State<DiaryPage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('新規捜査',
-                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
+            Text(
+              '新規捜査',
+              style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
+            ),
             const SizedBox(height: 2),
-            Text('― 証拠を集める ―',
-                style: DetectiveTextStyles.appBarSubtitle(
-                    color: c.appBarSubtitle)),
+            Text(
+              '― 証拠を集める ―',
+              style: DetectiveTextStyles.appBarSubtitle(
+                color: c.appBarSubtitle,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -923,9 +1175,7 @@ class _DiaryPageState extends State<DiaryPage> {
               if (_uid == null) return;
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => DiaryListPage(uid: _uid!),
-                ),
+                MaterialPageRoute(builder: (_) => DiaryListPage(uid: _uid!)),
               );
             },
           ),
@@ -985,7 +1235,9 @@ class _DiaryPageState extends State<DiaryPage> {
           if (!_showExistingDiaryChoice && showChoices)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: _currentChoices!.length > 2
+              child: _phase == _Phase.emptyDaySelect
+                  ? _buildStackedChoiceButtons(_currentChoices!)
+                  : _currentChoices!.length > 2
                   ? _buildDropdown(_currentChoices!)
                   : _buildChoiceButtons(_currentChoices!),
             ),
@@ -1005,7 +1257,8 @@ class _DiaryPageState extends State<DiaryPage> {
                           side: BorderSide(color: c.gold),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20)),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
                         ),
                         child: const Text('閉じる'),
                       ),
@@ -1031,7 +1284,8 @@ class _DiaryPageState extends State<DiaryPage> {
                           foregroundColor: c.appBarFg,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20)),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
                         ),
                         child: const Text('編集する'),
                       ),
@@ -1062,8 +1316,7 @@ class _DiaryPageState extends State<DiaryPage> {
                               foregroundColor: label == 'これを記録'
                                   ? c.appBarFg
                                   : c.textPrimary,
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(20),
                               ),
@@ -1086,15 +1339,16 @@ class _DiaryPageState extends State<DiaryPage> {
                             style: OutlinedButton.styleFrom(
                               foregroundColor: c.gold,
                               side: BorderSide(color: c.gold, width: 1),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(20),
                               ),
                             ),
-                            child: Text(label,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(fontSize: 12)),
+                            child: Text(
+                              label,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 12),
+                            ),
                           ),
                         ),
                       );
@@ -1158,6 +1412,8 @@ class _DiaryPageState extends State<DiaryPage> {
           // 進捗バー（質問フェーズ中のみ表示）
           if (_totalQuestions > 0 &&
               !_diaryGenerated &&
+              _phase != _Phase.startSelect &&
+              _phase != _Phase.emptyDaySelect &&
               _phase != _Phase.diaryView &&
               _phase != _Phase.done)
             Padding(
@@ -1169,7 +1425,6 @@ class _DiaryPageState extends State<DiaryPage> {
                 valueColor: AlwaysStoppedAnimation<Color>(c.gold),
               ),
             ),
-
 
           if (!_showExistingDiaryChoice && showInput)
             InputArea(controller: _textController, onSubmit: _sendUserReply),

@@ -50,6 +50,28 @@ class DiaryPrompts {
         '■励まし（光っている取り組みへの一言）';
   }
 
+  static String buildMemoryQuestionPrompt(
+    List<MapEntry<String, Map<String, dynamic>>> entries,
+  ) {
+    final sorted = [...entries]..sort((a, b) => a.key.compareTo(b.key));
+    final body = sorted.isEmpty ? 'まだ参照できる過去ログはありません。' : _formatEntries(sorted);
+
+    return '以下は依頼人の直近${sorted.length}日分の事件簿である。\n\n'
+        '$body\n\n'
+        '【依頼内容】\n'
+        '依頼人は今日、「何もなかった」と感じている。'
+        'しかし日記を書くための手がかりを一緒に探したい。\n'
+        '過去2週間の記録に出てくる生活リズム、場所、人、作業、感情の傾向を参考にして、'
+        '今日を思い出すための質問を5〜6問作ってください。\n\n'
+        '【質問のルール】\n'
+        '- 質問は短く、1問につき1つのことだけ聞く\n'
+        '- 過去ログの事実を断定しすぎず、「今日はどうだったか」を聞く\n'
+        '- 日記本文を生成せず、質問だけを返す\n'
+        '- ネガティブな決めつけや評価をしない\n\n'
+        '出力は次のJSON形式だけにしてください：\n'
+        '{"questions":["質問1","質問2","質問3","質問4","質問5"]}';
+  }
+
   // 複数エントリを「【日付】日記: ... / 回答: ...」形式の文字列に整形する
   static String _formatEntries(
     List<MapEntry<String, Map<String, dynamic>>> entries,

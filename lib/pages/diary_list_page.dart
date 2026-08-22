@@ -28,12 +28,17 @@ class DiaryListPage extends StatelessWidget {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('事件簿アーカイブ',
-                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
+            Text(
+              '事件簿アーカイブ',
+              style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
+            ),
             const SizedBox(height: 2),
-            Text('― 過去の記録を参照する ―',
-                style: DetectiveTextStyles.appBarSubtitle(
-                    color: c.appBarSubtitle)),
+            Text(
+              '― 過去の記録を参照する ―',
+              style: DetectiveTextStyles.appBarSubtitle(
+                color: c.appBarSubtitle,
+              ),
+            ),
           ],
         ),
       ),
@@ -45,9 +50,7 @@ class DiaryListPage extends StatelessWidget {
         builder: (context, snapshot) {
           // 読み込み中: ゴールドのローディングインジケーター
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-              child: CircularProgressIndicator(color: c.gold),
-            );
+            return Center(child: CircularProgressIndicator(color: c.gold));
           }
 
           if (snapshot.hasError) {
@@ -55,10 +58,13 @@ class DiaryListPage extends StatelessWidget {
           }
           // diary フィールドがないドキュメント（会話途中で終わったもの等）を除外し、
           // ドキュメントID（YYYY-MM-DD）の降順（新しい順）でクライアントソートする
-          final docs = (snapshot.data?.docs ?? [])
-              .where((d) => (d.data() as Map<String, dynamic>)['diary'] != null)
-              .toList()
-            ..sort((a, b) => b.id.compareTo(a.id));
+          final docs =
+              (snapshot.data?.docs ?? [])
+                  .where(
+                    (d) => (d.data() as Map<String, dynamic>)['diary'] != null,
+                  )
+                  .toList()
+                ..sort((a, b) => b.id.compareTo(a.id));
           if (docs.isEmpty) {
             return Center(
               child: Column(
@@ -68,10 +74,7 @@ class DiaryListPage extends StatelessWidget {
                   const SizedBox(height: 12),
                   Text(
                     'まだ事件の記録がありません',
-                    style: TextStyle(
-                      color: c.textSecondary,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(color: c.textSecondary, fontSize: 14),
                   ),
                 ],
               ),
@@ -120,8 +123,8 @@ class DiaryListPage extends StatelessWidget {
 // 左端ゴールドボーダー＋日付ゴールド表示で統一感を持たせる。
 // ──────────────────────────────────────────────────────────────
 class _CaseArchiveItem extends StatelessWidget {
-  final String date;   // YYYY-MM-DD形式
-  final String diary;  // 日記本文（プレビュー用）
+  final String date; // YYYY-MM-DD形式
+  final String diary; // 日記本文（プレビュー用）
   final VoidCallback onTap;
 
   const _CaseArchiveItem({
@@ -140,6 +143,7 @@ class _CaseArchiveItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final preview = diary.trim().isEmpty ? '（本文なし）' : diary;
     return Material(
       color: c.cardBg,
       shape: RoundedRectangleBorder(
@@ -171,7 +175,9 @@ class _CaseArchiveItem extends StatelessWidget {
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 12),
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -193,7 +199,7 @@ class _CaseArchiveItem extends StatelessWidget {
                       const SizedBox(height: 6),
                       // 日記本文のプレビュー（2行まで）
                       Text(
-                        diary,
+                        preview,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -210,8 +216,7 @@ class _CaseArchiveItem extends StatelessWidget {
               // 右端の矢印アイコン
               Padding(
                 padding: const EdgeInsets.only(right: 12),
-                child: Icon(Icons.chevron_right,
-                    color: c.goldLight, size: 20),
+                child: Icon(Icons.chevron_right, color: c.goldLight, size: 20),
               ),
             ],
           ),
