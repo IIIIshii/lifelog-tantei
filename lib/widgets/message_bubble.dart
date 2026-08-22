@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:animated_text_kit/animated_text_kit.dart';
 import '../core/theme/app_colors.dart';
 
 // 会話の1メッセージを尋問ログ風に表示するウィジェット
@@ -23,8 +24,9 @@ class MessageBubble extends StatelessWidget {
           maxWidth: MediaQuery.of(context).size.width * 0.75,
         ),
         child: Column(
-          crossAxisAlignment:
-              isAI ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+          crossAxisAlignment: isAI
+              ? CrossAxisAlignment.start
+              : CrossAxisAlignment.end,
           children: [
             // ── 発言者ラベル（探偵 / 証言）──────────────────────
             // 虫眼鏡アイコン付きの「探偵」ラベルでノワール感を演出する
@@ -74,7 +76,9 @@ class MessageBubble extends StatelessWidget {
                   Flexible(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
                       decoration: BoxDecoration(
                         // AI: クリーム / User: 薄茶で視覚的に区別する
                         color: isAI ? c.bubbleAi : c.bubbleUser,
@@ -91,14 +95,31 @@ class MessageBubble extends StatelessWidget {
                           bottomRight: const Radius.circular(12),
                         ),
                       ),
-                      child: Text(
-                        text,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: c.textPrimary,
-                          height: 1.5,
-                        ),
-                      ),
+                      child: isAI
+                          ? AnimatedTextKit(
+                              animatedTexts: [
+                                TypewriterAnimatedText(
+                                  text,
+                                  textStyle: TextStyle(
+                                    fontSize: 14,
+                                    color: c.textPrimary,
+                                    height: 1.5,
+                                  ),
+                                  speed: const Duration(milliseconds: 40),
+                                ),
+                              ],
+                              totalRepeatCount: 1,
+                              isRepeatingAnimation: false,
+                              displayFullTextOnTap: true,
+                            )
+                          : Text(
+                              text,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: c.textPrimary,
+                                height: 1.5,
+                              ),
+                            ),
                     ),
                   ),
 
