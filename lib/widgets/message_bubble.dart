@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:animated_text_kit/animated_text_kit.dart';
 import '../core/theme/app_colors.dart';
+import 'typewriter_text.dart';
 
 // 会話の1メッセージを尋問ログ風に表示するウィジェット
 // AI（探偵）は左寄せ・クリーム背景、ユーザー（証言）は右寄せ・薄茶背景で表示する
@@ -8,12 +8,31 @@ class MessageBubble extends StatelessWidget {
   final String role; // 'ai' または 'user'
   final String text;
 
-  const MessageBubble({super.key, required this.role, required this.text});
+  // タイプライター表示させるか。AIの発言かつ「まだ流していない」ものだけ true にする。
+  // 表示済みの発言まで true にすると、スクロールで画面外に出て戻るたびに
+  // ListView.builder が作り直して再生し直してしまう。
+  final bool animate;
+
+  // タイプが完了した（またはタップでスキップされた）ときに呼ばれる
+  final VoidCallback? onAnimationFinished;
+
+  const MessageBubble({
+    super.key,
+    required this.role,
+    required this.text,
+    this.animate = false,
+    this.onAnimationFinished,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isAI = role == 'ai';
     final c = context.colors;
+    final bodyStyle = TextStyle(
+      fontSize: 14,
+      color: c.textPrimary,
+      height: 1.5,
+    );
 
     return Align(
       alignment: isAI ? Alignment.centerLeft : Alignment.centerRight,
@@ -95,31 +114,15 @@ class MessageBubble extends StatelessWidget {
                           bottomRight: const Radius.circular(12),
                         ),
                       ),
-                      child: isAI
-                          ? AnimatedTextKit(
-                              animatedTexts: [
-                                TypewriterAnimatedText(
-                                  text,
-                                  textStyle: TextStyle(
-                                    fontSize: 14,
-                                    color: c.textPrimary,
-                                    height: 1.5,
-                                  ),
-                                  speed: const Duration(milliseconds: 40),
-                                ),
-                              ],
-                              totalRepeatCount: 1,
-                              isRepeatingAnimation: false,
-                              displayFullTextOnTap: true,
+                      // 流し終えた発言とユーザーの証言は素の Text で描画する。
+                      // タイプ対象は常に1件だけなので、履歴を遡っても再生されない。
+                      child: isAI && animate
+                          ? TypewriterText(
+                              text: text,
+                              style: bodyStyle,
+                              onFinished: onAnimationFinished,
                             )
-                          : Text(
-                              text,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: c.textPrimary,
-                                height: 1.5,
-                              ),
-                            ),
+                          : Text(text, style: bodyStyle),
                     ),
                   ),
 
