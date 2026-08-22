@@ -15,6 +15,8 @@ class GeminiService {
   final GenerativeModel _analysisModel;
   // 自由記述への短いリアクション（相槌）を返すモデル。プレーンテキスト出力。
   final GenerativeModel _reactionModel;
+  // 過去ログを読み、今日の日記を書くための質問リストを返すモデル。
+  final GenerativeModel _memoryQuestionModel;
 
   final String _role;
 
@@ -58,6 +60,23 @@ class GeminiService {
         model: 'gemini-2.5-flash',
         apiKey: apiKey,
         systemInstruction: Content.system(roleFor(role).interviewerInstruction),
+      ),
+      _memoryQuestionModel = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: apiKey,
+        systemInstruction: Content.system(roleFor(role).interviewerInstruction),
+        generationConfig: GenerationConfig(
+          responseMimeType: 'application/json',
+          responseSchema: Schema.object(
+            properties: {
+              'questions': Schema.array(
+                items: Schema.string(description: '依頼人へ投げる質問文'),
+                description: '今日の日記を書くための質問リスト',
+              ),
+            },
+            requiredProperties: ['questions'],
+          ),
+        ),
       );
 
   // 会話履歴を渡して深掘り質問をGeminiに生成させる。
@@ -104,6 +123,47 @@ class GeminiService {
       Content.text(prompt),
     ]);
     return response.text?.trim() ?? '';
+  }
+
+  Future<List<String>> generateMemoryQuestions(
+    List<MapEntry<String, Map<String, dynamic>>> entries,
+  ) async {
+    final prompt = DiaryPrompts.buildMemoryQuestionPrompt(entries);
+    final response = await _memoryQuestionModel.generateContent([
+      Content.text(prompt),
+    ]);
+    final text = response.text?.trim() ?? '';
+    final questions = <String>[];
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map<String, dynamic>) {
+        final rawQuestions = decoded['questions'];
+        if (rawQuestions is List) {
+          for (final q in rawQuestions) {
+            if (q is String && q.trim().isNotEmpty) {
+              questions.add(q.trim());
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // パースできない場合は下のフォールバックで最低限の質問を用意する
+    }
+
+    const fallback = [
+      '今朝はどんなふうに一日が始まった？',
+      'いつもと少し違った場面はあったか？',
+      '誰かとのやりとりで覚えていることはあるか？',
+      '食事や移動、作業の中で印象に残ったものは？',
+      '今の気分に近い言葉を選ぶなら何だ？',
+      '明日の自分に残しておきたい手がかりはあるか？',
+    ];
+
+    for (final q in fallback) {
+      if (questions.length >= 5) break;
+      questions.add(q);
+    }
+    return questions.take(6).toList(growable: false);
   }
 
   // 会話履歴から日記テキストをGeminiに生成させる。

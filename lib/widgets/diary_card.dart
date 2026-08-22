@@ -11,6 +11,7 @@ class DiaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final displayDiary = diary.trim().isEmpty ? '（本文なし）' : diary;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
@@ -25,8 +26,7 @@ class DiaryCard extends StatelessWidget {
           // ── ヘッダー行 ──────────────────────────────────────
           // 左: 「事件報告書」ラベル / 右: 「CLOSED」バッジ
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               // ヘッダーと本文をゴールドの区切り線で分ける
               border: Border(bottom: BorderSide(color: c.gold)),
@@ -48,7 +48,9 @@ class DiaryCard extends StatelessWidget {
                 // CLOSEDバッジ（英字でノワール感を強調）
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 2),
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     border: Border.all(color: c.gold),
                     borderRadius: BorderRadius.circular(2),
@@ -71,7 +73,7 @@ class DiaryCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              diary,
+              displayDiary,
               style: TextStyle(
                 fontSize: 14,
                 color: c.textPrimary,

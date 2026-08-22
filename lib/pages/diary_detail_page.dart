@@ -6,9 +6,9 @@ import 'diary_edit_page.dart';
 
 // 特定の日の日記を事件報告書として全文表示する詳細ページ
 class DiaryDetailPage extends StatelessWidget {
-  final String date;               // 表示する日付（YYYY-MM-DD）
-  final String diary;              // 表示する日記テキスト
-  final String uid;                // 編集保存に必要なユーザーID
+  final String date; // 表示する日付（YYYY-MM-DD）
+  final String diary; // 表示する日記テキスト
+  final String uid; // 編集保存に必要なユーザーID
   final FirestoreService firestore;
 
   const DiaryDetailPage({
@@ -29,6 +29,7 @@ class DiaryDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final displayDiary = diary.trim().isEmpty ? '（本文なし）' : diary;
     return Scaffold(
       backgroundColor: c.background,
 
@@ -42,12 +43,17 @@ class DiaryDetailPage extends StatelessWidget {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_formatDate(date),
-                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
+            Text(
+              _formatDate(date),
+              style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
+            ),
             const SizedBox(height: 2),
-            Text('― 事件報告書 ―',
-                style: DetectiveTextStyles.appBarSubtitle(
-                    color: c.appBarSubtitle)),
+            Text(
+              '― 事件報告書 ―',
+              style: DetectiveTextStyles.appBarSubtitle(
+                color: c.appBarSubtitle,
+              ),
+            ),
           ],
         ),
       ),
@@ -55,76 +61,83 @@ class DiaryDetailPage extends StatelessWidget {
       // ── Body ────────────────────────────────────────────────
       body: Column(
         children: [
-          Expanded(child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Container(
-          decoration: BoxDecoration(
-            color: c.cardBg,
-            borderRadius: BorderRadius.circular(4),
-            // ゴールドの枠線でDiaryCardと同じ「重要書類」感を表現する
-            border: Border.all(color: c.gold, width: 1.5),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── ヘッダー行（DiaryCardと同じデザイン） ────────
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 10),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Container(
                 decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: c.gold)),
+                  color: c.cardBg,
+                  borderRadius: BorderRadius.circular(4),
+                  // ゴールドの枠線でDiaryCardと同じ「重要書類」感を表現する
+                  border: Border.all(color: c.gold, width: 1.5),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.description, color: c.gold, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      '事件報告書',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: c.gold,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                    const Spacer(),
-                    // CLOSEDバッジ
+                    // ── ヘッダー行（DiaryCardと同じデザイン） ────────
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: c.gold),
-                        borderRadius: BorderRadius.circular(2),
+                        horizontal: 16,
+                        vertical: 10,
                       ),
+                      decoration: BoxDecoration(
+                        border: Border(bottom: BorderSide(color: c.gold)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.description, color: c.gold, size: 16),
+                          const SizedBox(width: 6),
+                          Text(
+                            '事件報告書',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: c.gold,
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                          const Spacer(),
+                          // CLOSEDバッジ
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: c.gold),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            child: Text(
+                              'CLOSED',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: c.gold,
+                                letterSpacing: 1.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // ── 日記本文（全文表示） ──────────────────────────
+                    Padding(
+                      padding: const EdgeInsets.all(20),
                       child: Text(
-                        'CLOSED',
+                        displayDiary,
                         style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: c.gold,
-                          letterSpacing: 1.5,
+                          fontSize: 16,
+                          color: c.textPrimary,
+                          height: 1.8, // 行間を広めにとって読みやすくする
                         ),
                       ),
                     ),
                   ],
                 ),
               ),
-
-              // ── 日記本文（全文表示） ──────────────────────────
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Text(
-                  diary,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: c.textPrimary,
-                    height: 1.8, // 行間を広めにとって読みやすくする
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
-          ))),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: SizedBox(
@@ -146,11 +159,13 @@ class DiaryDetailPage extends StatelessWidget {
                   foregroundColor: c.appBarFg,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4)),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                 ),
-                child: const Text('編集する',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold)),
+                child: const Text(
+                  '編集する',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
               ),
             ),
           ),
