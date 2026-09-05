@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../services/firestore_service.dart';
+import '../widgets/case_archive_tile.dart';
 import 'diary_detail_page.dart';
 
 // 過去の日記一覧を事件簿アーカイブとして表示するページ
@@ -93,7 +94,7 @@ class DiaryListPage extends StatelessWidget {
 
               // タップで日記詳細ページへ遷移する
               final firestore = FirestoreService();
-              return _CaseArchiveItem(
+              return CaseArchiveTile(
                 date: date,
                 diary: diary,
                 onTap: () => Navigator.push(
@@ -111,116 +112,6 @@ class DiaryListPage extends StatelessWidget {
             },
           );
         },
-      ),
-    );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────
-// 事件簿アーカイブの1件分の表示ウィジェット
-//
-// ホームのCaseFileCardと同じファイル風デザインを踏襲し、
-// 左端ゴールドボーダー＋日付ゴールド表示で統一感を持たせる。
-// ──────────────────────────────────────────────────────────────
-class _CaseArchiveItem extends StatelessWidget {
-  final String date; // YYYY-MM-DD形式
-  final String diary; // 日記本文（プレビュー用）
-  final VoidCallback onTap;
-
-  const _CaseArchiveItem({
-    required this.date,
-    required this.diary,
-    required this.onTap,
-  });
-
-  // YYYY-MM-DD → YYYY年MM月DD日 に整形する
-  String _formatDate(String raw) {
-    final parts = raw.split('-');
-    if (parts.length != 3) return raw;
-    return '${parts[0]}年${parts[1]}月${parts[2]}日';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    final preview = diary.trim().isEmpty ? '（本文なし）' : diary;
-    return Material(
-      color: c.cardBg,
-      shape: RoundedRectangleBorder(
-        borderRadius: const BorderRadius.all(Radius.circular(4)),
-        side: BorderSide(color: c.cardBorder),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        customBorder: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(4)),
-        ),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 左端のゴールドアクセントボーダー（ホームカードと同スタイル）
-              Container(
-                width: 4,
-                decoration: BoxDecoration(
-                  color: c.gold,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(4),
-                    bottomLeft: Radius.circular(4),
-                  ),
-                ),
-              ),
-
-              // 日付と日記プレビュー
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 日付（ゴールド太字でアーカイブ番号のように見せる）
-                      Row(
-                        children: [
-                          Icon(Icons.folder_open, size: 14, color: c.gold),
-                          const SizedBox(width: 6),
-                          Text(
-                            _formatDate(date),
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: c.gold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      // 日記本文のプレビュー（2行まで）
-                      Text(
-                        preview,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: c.textSecondary,
-                          height: 1.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // 右端の矢印アイコン
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: Icon(Icons.chevron_right, color: c.goldLight, size: 20),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

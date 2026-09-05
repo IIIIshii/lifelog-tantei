@@ -148,7 +148,7 @@ class _LoginPageState extends State<LoginPage> {
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                              color: c.appBarFg,
+                              color: c.onAccent,
                               strokeWidth: 2,
                             ),
                           )
@@ -156,7 +156,7 @@ class _LoginPageState extends State<LoginPage> {
                     label: const Text('Googleでログイン'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: c.gold,
-                      foregroundColor: c.appBarFg,
+                      foregroundColor: c.onAccent,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
