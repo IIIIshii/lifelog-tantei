@@ -149,7 +149,7 @@ class _InputAreaState extends State<InputArea> {
                 shape: BoxShape.circle,
               ),
               child: Icon(Icons.arrow_forward,
-                  color: c.appBarFg, size: 20),
+                  color: c.onAccent, size: 20),
             ),
           ),
         ],

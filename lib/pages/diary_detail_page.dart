@@ -156,7 +156,7 @@ class DiaryDetailPage extends StatelessWidget {
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: c.gold,
-                  foregroundColor: c.appBarFg,
+                  foregroundColor: c.onAccent,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(4),

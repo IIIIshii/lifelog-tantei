@@ -335,9 +335,10 @@ class _SleepChart extends StatelessWidget {
           barRods: [
             BarChartRodData(
               toY: hours ?? 0,
-              color: hours != null
-                  ? c.gold
-                  : c.goldLight.withValues(alpha: 0.2),
+              // 記録なしの日も「棒がそこにある」ことは伝えたいので、
+              // 薄い透過ではなく cardBorder を不透明で使う。
+              // グラフの意味ある部分は背景に対し 3:1 が要る（WCAG SC 1.4.11）。
+              color: hours != null ? c.gold : c.cardBorder,
               width: 14,
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(4),
@@ -533,7 +534,7 @@ class _TableCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     if (value == null) {
-      return Text('—', style: TextStyle(color: c.cardBorder, fontSize: 12));
+      return Text('—', style: TextStyle(color: c.textSecondary, fontSize: 12));
     }
     return Text(
       value!,
@@ -760,14 +761,9 @@ class _PieCard extends StatelessWidget {
   final Map<String, int> distribution;
   const _PieCard({required this.title, required this.distribution});
 
-  static const _palette = <Color>[
-    Color(0xFFC8A951),
-    Color(0xFF8B6F2E),
-    Color(0xFFD4B97D),
-    Color(0xFF6B5320),
-    Color(0xFFE7D6A8),
-    Color(0xFFA0824A),
-  ];
+  // 扇形の上のパーセント表示は labelColorOn()（app_colors.dart）で決める。
+  // 以前は白で固定していたため、明るい扇形（旧 #E7D6A8）では 1.44:1 まで落ちて
+  // パーセント表示が消えていた。分類が4種を超えると必ず読めない扇形が出る。
 
   @override
   Widget build(BuildContext context) {
@@ -781,16 +777,20 @@ class _PieCard extends StatelessWidget {
     final sections = <PieChartSectionData>[];
     for (var i = 0; i < sortedEntries.length; i++) {
       final e = sortedEntries[i];
-      final color = _palette[i % _palette.length];
+      // パレットはテーマ側が持つ（明度に合わせて2セット用意されている）。
+      // 以前はこのファイルにハードコードしており、テーマを切り替えても
+      // 円グラフだけ配色が変わらなかった。
+      final palette = c.chartPalette;
+      final color = palette[i % palette.length];
       sections.add(
         PieChartSectionData(
           value: e.value.toDouble(),
           color: color,
           title: '${(e.value / total * 100).round()}%',
-          titleStyle: const TextStyle(
+          titleStyle: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.bold,
-            color: Colors.white,
+            color: labelColorOn(color),
           ),
           radius: 52,
         ),
@@ -827,7 +827,7 @@ class _PieCard extends StatelessWidget {
           const SizedBox(height: 8),
           // 凡例
           ...sortedEntries.asMap().entries.map((e) {
-            final color = _palette[e.key % _palette.length];
+            final color = c.chartPalette[e.key % c.chartPalette.length];
             final label = e.value.key;
             final count = e.value.value;
             return Padding(
@@ -961,7 +961,7 @@ class _AiInsightSection extends StatelessWidget {
                 label: const Text('探偵に推理させる'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: c.gold,
-                  foregroundColor: c.appBarFg,
+                  foregroundColor: c.onAccent,
                 ),
               ),
             ),

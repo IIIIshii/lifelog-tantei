@@ -2,10 +2,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 import '../services/auth_service.dart';
-import 'home_page.dart';
+import 'main_shell.dart';
 import 'login_page.dart';
 
-// 認証状態に応じて LoginPage / HomePage を切り替えるゲート。
+// 認証状態に応じて LoginPage / MainShell（ボトムナビのシェル）を切り替えるゲート。
 // 各ページが個別に匿名サインインを呼ぶ運用を廃止し、認証フローをここに集約する。
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
@@ -21,7 +21,7 @@ class AuthGate extends StatelessWidget {
         if (snapshot.data == null) {
           return const LoginPage();
         }
-        return const HomePage();
+        return const MainShell();
       },
     );
   }

@@ -1033,7 +1033,7 @@ class _DiaryPageState extends State<DiaryPage> {
           onPressed: () => _sendUserReply(choice),
           style: ElevatedButton.styleFrom(
             backgroundColor: c.gold,
-            foregroundColor: c.appBarFg,
+            foregroundColor: c.onAccent,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
@@ -1055,7 +1055,7 @@ class _DiaryPageState extends State<DiaryPage> {
             onPressed: () => _sendUserReply(choice),
             style: ElevatedButton.styleFrom(
               backgroundColor: c.gold,
-              foregroundColor: c.appBarFg,
+              foregroundColor: c.onAccent,
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
@@ -1314,7 +1314,7 @@ class _DiaryPageState extends State<DiaryPage> {
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: c.gold,
-                          foregroundColor: c.appBarFg,
+                          foregroundColor: c.onAccent,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(20),
@@ -1347,7 +1347,7 @@ class _DiaryPageState extends State<DiaryPage> {
                                   ? c.gold
                                   : c.bubbleUser,
                               foregroundColor: label == 'これを記録'
-                                  ? c.appBarFg
+                                  ? c.onAccent
                                   : c.textPrimary,
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(
@@ -1428,7 +1428,7 @@ class _DiaryPageState extends State<DiaryPage> {
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: c.gold,
-                          foregroundColor: c.appBarFg,
+                          foregroundColor: c.onAccent,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(20),
@@ -1468,10 +1468,10 @@ class _DiaryPageState extends State<DiaryPage> {
               padding: const EdgeInsets.only(bottom: 8),
               child: TextButton.icon(
                 onPressed: _skipCurrentQuestion,
-                icon: Icon(Icons.skip_next, size: 18, color: c.appBarSubtitle),
+                icon: Icon(Icons.skip_next, size: 18, color: c.textSecondary),
                 label: Text(
                   'この質問をスキップ',
-                  style: TextStyle(color: c.appBarSubtitle),
+                  style: TextStyle(color: c.textSecondary),
                 ),
               ),
             ),

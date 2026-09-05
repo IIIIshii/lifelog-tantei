@@ -143,7 +143,7 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: c.gold,
-                    foregroundColor: c.appBarFg,
+                    foregroundColor: c.onAccent,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20)),
@@ -177,7 +177,7 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
               decoration: InputDecoration(
                 hintText: '今日の出来事を自由に記述してください…',
                 hintStyle: TextStyle(
-                    color: c.textSecondary.withValues(alpha: 0.6)),
+                    color: c.textSecondary),
                 filled: true,
                 fillColor: c.cardBg,
                 border: OutlineInputBorder(
@@ -200,7 +200,7 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
               onPressed: _isSaving ? null : _save,
               style: ElevatedButton.styleFrom(
                 backgroundColor: c.gold,
-                foregroundColor: c.appBarFg,
+                foregroundColor: c.onAccent,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(4)),
@@ -210,7 +210,7 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(
-                          color: c.appBarFg, strokeWidth: 2))
+                          color: c.onAccent, strokeWidth: 2))
                   : Text(isEdit ? '編集を保存する' : '日記を保存する',
                       style: const TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold)),

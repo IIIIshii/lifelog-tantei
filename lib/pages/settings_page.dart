@@ -509,8 +509,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       value: _settings.notificationEnabled,
                       onChanged: _toggleNotification,
-                      activeThumbColor: c.gold,
-                      activeTrackColor: c.goldLight,
+                      activeThumbColor: c.onAccent,
+                      activeTrackColor: c.gold,
                     ),
                     Divider(height: 1, color: c.cardBorder),
                     ListTile(
@@ -709,8 +709,8 @@ class _SettingsTile extends StatelessWidget {
       value: value,
       onChanged: onChanged,
       // アクティブ時はゴールドで探偵テーマに統一（activeColorはv3.31以降非推奨）
-      activeThumbColor: c.gold,
-      activeTrackColor: c.goldLight,
+      activeThumbColor: c.onAccent,
+      activeTrackColor: c.gold,
     );
   }
 }
