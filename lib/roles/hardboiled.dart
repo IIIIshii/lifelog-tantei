@@ -32,11 +32,13 @@ const Role hardboiledRole = Role(
     'q_afternoon': '午後はどう動いた？',
     'q_evening': '夜の動向は？',
     // ナレーション
+    'intro_start': '今日の事件簿を記録するとしよう。',
     'intro_custom': 'まず、いくつか確認させてもらう。',
     'confirm_include': '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？',
     'intro_recall': '今日一日の行動を洗いざらい話してもらおう。',
     'intro_event': '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
     'ask_addendum': '他に言い残したことはあるか？',
+    'intro_modeselect': '進め方を決めろ。',
   },
   // ボタン選択への固定リアクション（API不使用）。ネガティブな評価はしない。
   reactionTexts: {

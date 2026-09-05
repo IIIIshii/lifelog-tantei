@@ -351,7 +351,10 @@ class _DiaryPageState extends State<DiaryPage> {
   Future<void> _askNext() async {
     switch (_phase) {
       case _Phase.startSelect:
-        _postAiMessage('今日の事件簿を作成する。どうする？', choices: ['いつも通りはじめる', '何もなかった…']);
+        _postAiMessage(
+          _currentRole.text('intro_start', '今日の事件簿を作成する。どうする？'),
+          choices: ['いつも通りはじめる', '何もなかった…'],
+        );
       case _Phase.emptyDaySelect:
         _postAiMessage(
           '何もなかった日として扱うか、それとも手がかりを探すか。選んでくれ。',
@@ -441,7 +444,10 @@ class _DiaryPageState extends State<DiaryPage> {
           choices: ['はい', 'いいえ'],
         );
       case _Phase.modeSelect:
-        _postAiMessage('今日の事件簿を作成する。どうする？', choices: ['質問に沿って作成', '自分で入力']);
+        _postAiMessage(
+          _currentRole.text('intro_modeselect', '今日の事件簿を作成する。どうする？'),
+          choices: ['質問に沿って作成', '自分で入力'],
+        );
       case _Phase.event:
         if (_eventQueue.isNotEmpty) {
           final q = _eventQueue.removeFirst();
