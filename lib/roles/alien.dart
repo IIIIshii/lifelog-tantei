@@ -31,11 +31,13 @@ const Role alienRole = Role(
     'q_afternoon': '午後ノ活動を報告セヨ。',
     'q_evening': '夜ノ時間タイ、ナニをシテいた？',
     // ナレーション
+    'intro_start': '本ジツの記録を開始スル。',
     'intro_custom': 'マズ、イクツカのコウモクを観測サセてもらう。',
     'confirm_include': 'データを記録シタ。コノ情報モ、デキゴトの報告書ニ含メるか？',
     'intro_recall': '本ジツのキミの全コウドウを、ワレに開示セヨ。',
     'intro_event': '本ジツ最大のデキゴトについて観測スル。思イ当タる事ショウはアルか？',
     'ask_addendum': 'ホカに、ワレに伝エルべきデータはアルか？',
+    'intro_modeselect': '記録ノ方式をセンタクセヨ。',
   },
   // ボタン選択への固定リアクション（API不使用）。ネガティブな評価はしない。
   reactionTexts: {

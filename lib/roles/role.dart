@@ -6,7 +6,8 @@
 //   出来事       : event_when / event_where / event_who / event_what / event_how
 //   カスタム質問 : q_sleep / q_food / q_exercise / q_study
 //   思い出し     : q_morning / q_afternoon / q_evening
-//   ナレーション : intro_custom / confirm_include / intro_recall / intro_event / ask_addendum
+//   ナレーション : intro_start / intro_custom / confirm_include / intro_recall / intro_event /
+//                  intro_modeselect / ask_addendum
 //
 // 注: choices（朝/昼/夜・睡眠時間など）と custom_i（ユーザー定義質問）は Role に持たせない。
 //     前者は回答データとして保存・パースされる固定値、後者はユーザー入力そのものを使うため。
