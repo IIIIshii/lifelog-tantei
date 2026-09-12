@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import '../models/user_settings.dart';
 
 // Firestoreへのデータ読み書きを担当するサービスクラス
@@ -17,9 +18,16 @@ class FirestoreService {
       final data = doc.data()!;
       final settings = UserSettings.fromMap(data);
       // customQuestionsが旧形式（インデックス依存）の場合、
-      // 不変idを発行した新形式に変換して書き戻す（初回読み込み時に一度だけ実行）
+      // 不変idを発行した新形式に変換して書き戻す（初回読み込み時に一度だけ実行）。
+      // 書き戻しがオフライン等で失敗しても、既にメモリ上にある settings は
+      // そのまま返す（設定読み込み自体を巻き添えで失敗させない）。
+      // Firestore上のデータは旧形式のままなので、次回読み込み時に再度移行が試みられる。
       if (UserSettings.needsCustomQuestionsMigration(data)) {
-        await saveUserSettings(uid, settings);
+        try {
+          await saveUserSettings(uid, settings);
+        } catch (e) {
+          debugPrint('カスタム質問の移行書き戻しに失敗しました: $e');
+        }
       }
       return settings;
     }
