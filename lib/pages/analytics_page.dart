@@ -52,10 +52,12 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       final settingsFuture = _firestore.getUserSettings(uid);
       final analysisFuture = _firestore.getLatestAnalysis(uid);
       final dailyCommentFuture = _firestore.getTodayComment(uid);
+      final selfAnalysisFuture = _firestore.getSelfAnalysis(uid);
       final entries = await entriesFuture;
       final settings = await settingsFuture;
       final analysis = await analysisFuture;
       final dailyComment = await dailyCommentFuture;
+      final selfAnalysis = await selfAnalysisFuture;
 
       final sleepData = <String, double?>{};
       final entriesData = <String, Map<String, dynamic>>{};
@@ -68,9 +70,12 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
       final summary = _AnalyticsSummary.from(entries, _dateRange);
 
+      // 自己分析は共有トグルの判定ごと GeminiService に委ねる。
+      // OFF なら所見・今日のコメントのどちらにも差し込まれない。
       _gemini = GeminiService(
         dotenv.env['GEMINI_API_KEY'] ?? '',
         settings.selectedRole,
+        selfAnalysis: selfAnalysis,
       );
 
       setState(() {

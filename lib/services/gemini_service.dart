@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import '../models/self_analysis.dart';
 import '../prompts/ai_instructions.dart';
 import '../prompts/diary_prompts.dart';
 import '../roles/roles.dart';
@@ -20,12 +21,43 @@ class GeminiService {
 
   final String _role;
 
-  GeminiService(String apiKey, String role)
-    : _role = role,
+  // 自己分析（MBTI等）を systemInstruction の末尾へ差し込むためのブロック。
+  // 初期化子リストでは計算ができないため、factory で組み立ててから private コンストラクタへ渡す。
+  // selfAnalysis を省略した場合は従来どおり何も差し込まれない。
+  factory GeminiService(
+    String apiKey,
+    String role, {
+    SelfAnalysis? selfAnalysis,
+  }) {
+    final summary = selfAnalysis?.promptSummary() ?? '';
+    // トグルごとに渡す/渡さないを分ける。日記本文の生成（_diaryModel）には渡さない
+    // ―― 日記は事実の記録であり、性格の推測を混ぜる場所ではないため。
+    final interviewProfile = (selfAnalysis?.shareWithInterview ?? false)
+        ? summary
+        : '';
+    final analysisProfile = (selfAnalysis?.shareWithAnalysis ?? false)
+        ? summary
+        : '';
+    return GeminiService._(
+      apiKey,
+      role,
+      AiInstructions.selfProfile(interviewProfile),
+      AiInstructions.selfProfile(analysisProfile),
+    );
+  }
+
+  GeminiService._(
+    String apiKey,
+    String role,
+    String interviewProfile,
+    String analysisProfile,
+  ) : _role = role,
       _interviewModel = GenerativeModel(
         model: 'gemini-2.5-flash',
         apiKey: apiKey,
-        systemInstruction: Content.system(roleFor(role).interviewerInstruction),
+        systemInstruction: Content.system(
+          '${roleFor(role).interviewerInstruction}$interviewProfile',
+        ),
         // 構造化出力: {sufficient: bool, question: string} を強制し、
         // 「DONE」文字列マッチによる脆い終了判定を廃止する
         generationConfig: GenerationConfig(
@@ -52,19 +84,23 @@ class GeminiService {
         model: 'gemini-2.5-flash',
         apiKey: apiKey,
         systemInstruction: Content.system(
-          AiInstructions.analyst(roleFor(role).analystStyle),
+          '${AiInstructions.analyst(roleFor(role).analystStyle)}$analysisProfile',
         ),
       ),
       // インタビュアーと同じ人格指示だが、JSON構造化はせずプレーンテキストで相槌を返す
       _reactionModel = GenerativeModel(
         model: 'gemini-2.5-flash',
         apiKey: apiKey,
-        systemInstruction: Content.system(roleFor(role).interviewerInstruction),
+        systemInstruction: Content.system(
+          '${roleFor(role).interviewerInstruction}$interviewProfile',
+        ),
       ),
       _memoryQuestionModel = GenerativeModel(
         model: 'gemini-2.5-flash',
         apiKey: apiKey,
-        systemInstruction: Content.system(roleFor(role).interviewerInstruction),
+        systemInstruction: Content.system(
+          '${roleFor(role).interviewerInstruction}$interviewProfile',
+        ),
         generationConfig: GenerationConfig(
           responseMimeType: 'application/json',
           responseSchema: Schema.object(

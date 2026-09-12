@@ -170,9 +170,7 @@ class _DiaryPageState extends State<DiaryPage> {
         return;
       }
 
-      final settings = await _firestore.getUserSettings(_uid!);
-      _currentRole = roleFor(settings.selectedRole);
-      _gemini = GeminiService(_apiKey, settings.selectedRole);
+      final settings = await _initGemini();
       // 質問文・ナレーションはロール定義から同期的に引く（Gemini生成の待ちは無い）
       _buildQueues(settings);
       await _askNext();
@@ -231,9 +229,7 @@ class _DiaryPageState extends State<DiaryPage> {
       _isLoading = true;
     });
     try {
-      final settings = await _firestore.getUserSettings(_uid!);
-      _currentRole = roleFor(settings.selectedRole);
-      _gemini = GeminiService(_apiKey, settings.selectedRole);
+      final settings = await _initGemini();
       _buildQueues(settings);
       await _askNext();
     } catch (e) {
@@ -244,6 +240,23 @@ class _DiaryPageState extends State<DiaryPage> {
   }
 
   // ユーザー設定を元に各質問キューを構築する
+  // ロール設定と自己分析を読み、この捜査セッションで使う Gemini クライアントを組み立てる。
+  // 初回開始と「いちから作り直す」の両方から呼ばれるため1か所にまとめている。
+  // 自己分析は共有トグルの判定ごと GeminiService に委ねる（OFF なら何も差し込まれない）。
+  Future<UserSettings> _initGemini() async {
+    final settingsFuture = _firestore.getUserSettings(_uid!);
+    final selfAnalysisFuture = _firestore.getSelfAnalysis(_uid!);
+    final settings = await settingsFuture;
+    final selfAnalysis = await selfAnalysisFuture;
+    _currentRole = roleFor(settings.selectedRole);
+    _gemini = GeminiService(
+      _apiKey,
+      settings.selectedRole,
+      selfAnalysis: selfAnalysis,
+    );
+    return settings;
+  }
+
   void _buildQueues(UserSettings settings) {
     // ── カスタム質問キュー（sleep/food/exercise/study + ユーザー定義）──
     // 質問文はロール定義から引く（未定義キーは第2引数のデフォルト文を使う）。

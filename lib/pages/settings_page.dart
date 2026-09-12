@@ -12,6 +12,7 @@ import '../models/user_settings.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
+import '../widgets/settings_section.dart';
 
 // ユーザーが捜査（記録）方針を設定する画面
 // 記録項目のON/OFFとカスタム質問の管理を行う
@@ -264,7 +265,7 @@ class _SettingsPageState extends State<SettingsPage> {
               padding: const EdgeInsets.all(20),
               children: [
                 // ── セクション: アカウント ──────────────────────
-                const _SectionHeader(
+                const SectionHeader(
                   title: '◆ アカウント',
                   subtitle: '現在のログイン情報',
                 ),
@@ -273,22 +274,22 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 28),
 
                 // ── セクション1: 捜査項目 ──────────────────────
-                const _SectionHeader(
+                const SectionHeader(
                   title: '◆ 捜査項目の選択',
                   subtitle: '記録したい項目を追加',
                 ),
                 const SizedBox(height: 8),
-                _SettingsCard(
+                SettingsCard(
                   children: [
                     // 「その日の印象的なイベント」は必須項目のため常にON・変更不可
-                    const _SettingsTile(
+                    const SettingsSwitchTile(
                       title: 'その日の印象的なイベント',
                       subtitle: '今日の出来事についてAIが質問します（必須）',
                       value: true,
                       onChanged: null,
                     ),
                     Divider(height: 1, color: c.cardBorder),
-                    _SettingsTile(
+                    SettingsSwitchTile(
                       title: '思い出しアシスト',
                       subtitle: '午前・午後・夜に何をしたか追加で聞きます',
                       value: _settings.recallAssist,
@@ -296,7 +297,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           _save(_settings.copyWith(recallAssist: v)),
                     ),
                     Divider(height: 1, color: c.cardBorder),
-                    _SettingsTile(
+                    SettingsSwitchTile(
                       title: '睡眠時間',
                       subtitle: '昨夜の睡眠について記録します',
                       value: _settings.recordSleep,
@@ -304,7 +305,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           _save(_settings.copyWith(recordSleep: v)),
                     ),
                     Divider(height: 1, color: c.cardBorder),
-                    _SettingsTile(
+                    SettingsSwitchTile(
                       title: '食べたもの',
                       subtitle: '今日の食事について記録します',
                       value: _settings.recordFood,
@@ -312,7 +313,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           _save(_settings.copyWith(recordFood: v)),
                     ),
                     Divider(height: 1, color: c.cardBorder),
-                    _SettingsTile(
+                    SettingsSwitchTile(
                       title: '運動習慣',
                       subtitle: '今日の運動について記録します',
                       value: _settings.recordExercise,
@@ -320,7 +321,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           _save(_settings.copyWith(recordExercise: v)),
                     ),
                     Divider(height: 1, color: c.cardBorder),
-                    _SettingsTile(
+                    SettingsSwitchTile(
                       title: '勉強内容',
                       subtitle: '今日の勉強について記録します',
                       value: _settings.recordStudy,
@@ -333,12 +334,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 28),
 
                 // ── セクション2: 独自質問 ──────────────────────
-                const _SectionHeader(
+                const SectionHeader(
                   title: '◆ 独自質問リスト',
                   subtitle: '自分だけの質問を追加',
                 ),
                 const SizedBox(height: 8),
-                _SettingsCard(
+                SettingsCard(
                   children: [
                     // 登録済みカスタム質問を一覧表示する
                     ..._settings.customQuestions.asMap().entries.map((entry) {
@@ -410,7 +411,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 // ── セクション: テーマ選択 ──────────────────────
                 // ValueListenableBuilder で ThemeController を購読し、
                 // 選択中テーマの変化でラジオボタンを再描画する
-                const _SectionHeader(
+                const SectionHeader(
                   title: '◆ テーマ',
                   subtitle: 'アプリの見た目を切り替える',
                 ),
@@ -418,7 +419,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ValueListenableBuilder<AppThemeName>(
                   valueListenable: ThemeController.instance.notifier,
                   builder: (context, currentTheme, _) {
-                    return _SettingsCard(
+                    return SettingsCard(
                       children: [
                         for (var i = 0;
                             i < AppThemeName.values.length;
@@ -441,12 +442,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 // ── セクション3: データ管理 ──────────────────────
                 // デバッグビルドのみシードボタンを表示する
                 if (kDebugMode) ...[
-                  const _SectionHeader(
+                  const SectionHeader(
                     title: '◆ デバッグ',
                     subtitle: 'デバッグビルドのみ表示',
                   ),
                   const SizedBox(height: 8),
-                  _SettingsCard(
+                  SettingsCard(
                     children: [
                       ListTile(
                         leading: Icon(Icons.bug_report_outlined, color: c.gold),
@@ -484,12 +485,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
 
                 // ── セクション: 通知設定 ──────────────────────
-                const _SectionHeader(
+                const SectionHeader(
                   title: '◆ 通知設定',
                   subtitle: '日記を書く時刻にリマインダーを受け取る',
                 ),
                 const SizedBox(height: 8),
-                _SettingsCard(
+                SettingsCard(
                   children: [
                     SwitchListTile(
                       title: Text(
@@ -554,12 +555,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 28),
 
                 // ── セクション: エクスポート ──────────────────────
-                const _SectionHeader(
+                const SectionHeader(
                   title: '◆ データ管理',
                   subtitle: '日記データをCSVファイルでエクスポート',
                 ),
                 const SizedBox(height: 8),
-                _SettingsCard(
+                SettingsCard(
                   children: [
                     ListTile(
                       leading: Icon(Icons.download_outlined, color: c.gold),
@@ -595,122 +596,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
             ),
-    );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────
-// セクションの見出しウィジェット
-//
-// タイトル（太字・ゴールド）とその下に機能説明のサブタイトルを表示する。
-// ◆ 記号でノワール感のある区切りを演出する。
-// ──────────────────────────────────────────────────────────────
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  final String subtitle;
-
-  const _SectionHeader({required this.title, required this.subtitle});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-            color: c.gold,
-            letterSpacing: 0.5,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          subtitle,
-          style: TextStyle(
-            fontSize: 11,
-            color: c.textSecondary,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────
-// 設定項目をまとめる書類風カードウィジェット
-//
-// ホームのCaseFileCardと同じテイストでクリーム背景＋ゴールド枠線を使用。
-// 角丸を小さくして書類感を強調する。
-// ──────────────────────────────────────────────────────────────
-class _SettingsCard extends StatelessWidget {
-  final List<Widget> children;
-
-  const _SettingsCard({required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.cardBg,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: c.cardBorder),
-      ),
-      // ClipRRectでカード内のウィジェットが角丸からはみ出ないようにする
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: Column(children: children),
-      ),
-    );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────
-// 各設定項目のスイッチ付きタイルウィジェット
-//
-// onChangedがnullの場合はスイッチが無効（変更不可）になる。
-// 必須項目（イベント記録）はnullを渡してグレーアウトする。
-// ──────────────────────────────────────────────────────────────
-class _SettingsTile extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final bool value;
-  final ValueChanged<bool>? onChanged; // nullの場合はスイッチが無効（変更不可）
-
-  const _SettingsTile({
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return SwitchListTile(
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w500,
-          color: c.textPrimary,
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(
-          fontSize: 12,
-          color: c.textSecondary,
-        ),
-      ),
-      value: value,
-      onChanged: onChanged,
-      // アクティブ時はゴールドで探偵テーマに統一（activeColorはv3.31以降非推奨）
-      activeThumbColor: c.onAccent,
-      activeTrackColor: c.gold,
     );
   }
 }
@@ -837,7 +722,7 @@ class _AccountCard extends StatelessWidget {
         ? '※ 端末固有のデータです。他端末からは参照できません'
         : (user?.email ?? '');
 
-    return _SettingsCard(
+    return SettingsCard(
       children: [
         ListTile(
           leading: Icon(
