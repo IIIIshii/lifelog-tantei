@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:uuid/uuid.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/detective_text_styles.dart';
@@ -129,12 +130,16 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // テキストフィールドの内容をカスタム質問リストに追加して保存する
+  // 追加時に不変idを発行し、以後の回答保存・表示紐付けのキーとして使う
   void _addCustomQuestion() {
     final text = _customQuestionController.text.trim();
     if (text.isEmpty) return;
     _customQuestionController.clear();
     _save(_settings.copyWith(
-      customQuestions: [..._settings.customQuestions, text],
+      customQuestions: [
+        ..._settings.customQuestions,
+        CustomQuestion(id: const Uuid().v4(), text: text),
+      ],
     ));
   }
 
@@ -209,10 +214,10 @@ class _SettingsPageState extends State<SettingsPage> {
     return value;
   }
 
-  // 指定インデックスのカスタム質問を削除して保存する
-  void _removeCustomQuestion(int index) {
-    final updated = List<String>.from(_settings.customQuestions)
-      ..removeAt(index);
+  // 指定idのカスタム質問を削除して保存する
+  void _removeCustomQuestion(String id) {
+    final updated =
+        _settings.customQuestions.where((q) => q.id != id).toList();
     _save(_settings.copyWith(customQuestions: updated));
   }
 
@@ -342,11 +347,12 @@ class _SettingsPageState extends State<SettingsPage> {
                   children: [
                     // 登録済みカスタム質問を一覧表示する
                     ..._settings.customQuestions.asMap().entries.map((entry) {
+                      final question = entry.value;
                       return Column(
                         children: [
                           ListTile(
                             title: Text(
-                              entry.value,
+                              question.text,
                               style: TextStyle(
                                 fontSize: 14,
                                 color: c.textPrimary,
@@ -357,7 +363,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               icon: Icon(Icons.delete_outline,
                                   color: c.textSecondary, size: 20),
                               onPressed: () =>
-                                  _removeCustomQuestion(entry.key),
+                                  _removeCustomQuestion(question.id),
                             ),
                           ),
                           if (entry.key <

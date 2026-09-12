@@ -439,7 +439,7 @@ class _RecordsTable extends StatelessWidget {
   // dates は新しい順（降順）
   final List<String> dates;
   final Map<String, Map<String, dynamic>> entriesData;
-  final List<String> customQuestions;
+  final List<CustomQuestion> customQuestions;
 
   const _RecordsTable({
     required this.dates,
@@ -457,11 +457,8 @@ class _RecordsTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final customHeaders = customQuestions
-        .asMap()
-        .entries
-        .map((e) => _truncate(e.value, 10))
-        .toList();
+    final customHeaders =
+        customQuestions.map((q) => _truncate(q.text, 10)).toList();
     final allHeaders = [..._fixedHeaders, ...customHeaders];
 
     return Container(
@@ -512,8 +509,8 @@ class _RecordsTable extends StatelessWidget {
               }),
             ];
 
-            final customCells = customQuestions.asMap().entries.map((e) {
-              final val = answers?['custom_${e.key}'] as String?;
+            final customCells = customQuestions.map((q) {
+              final val = answers?['custom_${q.id}'] as String?;
               return DataCell(_TableCell(value: val));
             }).toList();
 

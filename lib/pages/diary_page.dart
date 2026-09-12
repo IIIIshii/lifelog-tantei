@@ -300,9 +300,9 @@ class _DiaryPageState extends State<DiaryPage> {
         ),
       );
     }
-    for (var i = 0; i < settings.customQuestions.length; i++) {
+    for (final question in settings.customQuestions) {
       _customQueue.add(
-        _Question(settings.customQuestions[i], key: 'custom_$i'),
+        _Question(question.text, key: 'custom_${question.id}'),
       );
     }
 
