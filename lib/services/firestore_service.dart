@@ -14,7 +14,14 @@ class FirestoreService {
         .doc('preferences')
         .get();
     if (doc.exists && doc.data() != null) {
-      return UserSettings.fromMap(doc.data()!);
+      final data = doc.data()!;
+      final settings = UserSettings.fromMap(data);
+      // customQuestionsが旧形式（インデックス依存）の場合、
+      // 不変idを発行した新形式に変換して書き戻す（初回読み込み時に一度だけ実行）
+      if (UserSettings.needsCustomQuestionsMigration(data)) {
+        await saveUserSettings(uid, settings);
+      }
+      return settings;
     }
     return UserSettings.defaults();
   }
@@ -158,6 +165,7 @@ class FirestoreService {
   Future<void> seedMockData(String uid) async {
     // 回答キーに対応する記録項目を有効化し、カスタム質問2問を設定済みにする。
     // モデルの toMap() を再利用し、フィールド定義の二重管理を避ける。
+    // idは以下のモックエントリの回答キー（custom_mock-q1等）と対応させる固定値。
     const demoSettings = UserSettings(
       recordEvent: true,
       recallAssist: true,
@@ -165,7 +173,10 @@ class FirestoreService {
       recordFood: true,
       recordExercise: true,
       recordStudy: true,
-      customQuestions: ['今日、心が動く瞬間はあった？', '今日、初めて・新しく挑戦したことは？'],
+      customQuestions: [
+        CustomQuestion(id: 'mock-q1', text: '今日、心が動く瞬間はあった？'),
+        CustomQuestion(id: 'mock-q2', text: '今日、初めて・新しく挑戦したことは？'),
+      ],
       selectedRole: 'hardboiled',
     );
     await saveUserSettings(uid, demoSettings);
@@ -180,8 +191,8 @@ class FirestoreService {
           'food': 'カフェのパスタ',
           'exercise': 'した',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': 'カフェで初めてオーダーを全部英語でしてみた',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': 'カフェで初めてオーダーを全部英語でしてみた',
           'morning': '洗濯と部屋の掃除をした',
           'afternoon': '近所のカフェで本を読んだ',
           'evening': '友人とオンラインゲームをした',
@@ -201,8 +212,8 @@ class FirestoreService {
           'food': '学食のカレー',
           'exercise': 'していない',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': '図書館の自習室を初めて予約して使った',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': '図書館の自習室を初めて予約して使った',
           'morning': '授業（統計学・線形代数）',
           'afternoon': '図書館で課題レポートを書いた',
           'evening': '夕食後すぐ寝てしまった',
@@ -222,8 +233,8 @@ class FirestoreService {
           'food': '鶏むね肉の照り焼き（自炊）',
           'exercise': 'した',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': 'pandasのgroupbyを初めて使いこなせた',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': 'pandasのgroupbyを初めて使いこなせた',
           'morning': '授業（プログラミング演習）',
           'afternoon': '研究室でPythonのデバッグ作業',
           'evening': 'ジムでランニングとストレッチ',
@@ -243,8 +254,8 @@ class FirestoreService {
           'food': '居酒屋',
           'exercise': 'した',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': '居酒屋で苦手なレバーを初めて完食できた',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': '居酒屋で苦手なレバーを初めて完食できた',
           'morning': 'オンライン講義（機械学習入門）の視聴',
           'afternoon': '近所を30分散歩してから昼寝',
           'evening': '友人と居酒屋に行った',
@@ -264,8 +275,8 @@ class FirestoreService {
           'food': '日替わり定食',
           'exercise': 'していない',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': 'ヒープの実装を手書きで1から書いてみた',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': 'ヒープの実装を手書きで1から書いてみた',
           'morning': '授業（英語・データ構造）',
           'afternoon': '図書館で試験勉強',
           'evening': '帰宅後すぐ入浴・読書',
@@ -285,8 +296,8 @@ class FirestoreService {
           'food': 'アルバイト先でまかない（カレー）',
           'exercise': 'していない',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': 'バイト中に常連さんから新メニューの感想を自分から聞いてみた',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': 'バイト中に常連さんから新メニューの感想を自分から聞いてみた',
           'morning': '授業（確率論）・小テスト',
           'afternoon': 'カフェでアルバイト（16〜21時）',
           'evening': '帰宅後シャワーを浴びて就寝',
@@ -306,8 +317,8 @@ class FirestoreService {
           'food': 'デリバリーのピザ',
           'exercise': 'していない',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': 'Gemini APIを使ったアプリを初めて動かせた',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': 'Gemini APIを使ったアプリを初めて動かせた',
           'morning': 'ゆっくり起床・Youtubeを見ながらストレッチ',
           'afternoon': 'ハッカソンの作業（Flutterアプリ開発）',
           'evening': '作業の続き・レビュー準備',
@@ -327,8 +338,8 @@ class FirestoreService {
           'food': '鮭の塩焼き（自炊）',
           'exercise': 'した',
           'study': 'していない',
-          'custom_0': 'はい',
-          'custom_1': '思い切って早朝ランニングを始めてみた',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': '思い切って早朝ランニングを始めてみた',
           'morning': '早起きして近所の公園を走った',
           'afternoon': '授業（アルゴリズム）',
           'evening': '早めに就寝',
@@ -348,8 +359,8 @@ class FirestoreService {
           'food': '学食の定食',
           'exercise': 'していない',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': '研究室の輪講で初めて発表を担当した',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': '研究室の輪講で初めて発表を担当した',
           'morning': '発表スライドの最終確認',
           'afternoon': '研究室の輪講で初めて発表した',
           'evening': '友人と通話で打ち上げ',
@@ -369,8 +380,8 @@ class FirestoreService {
           'food': 'カフェのサンドイッチ',
           'exercise': 'した',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': '長く探していた絶版の数学書を古本屋で手に入れた',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': '長く探していた絶版の数学書を古本屋で手に入れた',
           'morning': '授業（微分積分）',
           'afternoon': '課題と読書',
           'evening': '帰り道に古本屋へ立ち寄った',
@@ -390,8 +401,8 @@ class FirestoreService {
           'food': 'スパイスから作ったカレー',
           'exercise': 'していない',
           'study': 'していない',
-          'custom_0': 'いいえ',
-          'custom_1': 'スパイスを調合して一からカレーを作ってみた',
+          'custom_mock-q1': 'いいえ',
+          'custom_mock-q2': 'スパイスを調合して一からカレーを作ってみた',
           'morning': '雨音を聞きながら二度寝',
           'afternoon': '録画した番組をゆっくり消化',
           'evening': 'スパイスからカレー作りに挑戦',
@@ -411,8 +422,8 @@ class FirestoreService {
           'food': 'アルバイト先のまかない',
           'exercise': 'していない',
           'study': 'した',
-          'custom_0': 'はい',
-          'custom_1': 'バイトで初めてレジ締めを任された',
+          'custom_mock-q1': 'はい',
+          'custom_mock-q2': 'バイトで初めてレジ締めを任された',
           'morning': '授業（線形代数）',
           'afternoon': '図書館で予習',
           'evening': 'カフェのアルバイトで初めてレジ締めをした',
@@ -432,8 +443,8 @@ class FirestoreService {
           'food': '学食のカレー',
           'exercise': 'していない',
           'study': 'した',
-          'custom_0': 'いいえ',
-          'custom_1': 'クラウドへの自動バックアップを設定した',
+          'custom_mock-q1': 'いいえ',
+          'custom_mock-q2': 'クラウドへの自動バックアップを設定した',
           'morning': '授業（確率統計）',
           'afternoon': '消えたプレゼン資料を作り直した',
           'evening': 'バックアップ環境を見直した',
@@ -453,8 +464,8 @@ class FirestoreService {
           'food': 'おかゆ',
           'exercise': 'していない',
           'study': 'していない',
-          'custom_0': 'いいえ',
-          'custom_1': '体調を優先して一日きちんと休むと決めた',
+          'custom_mock-q1': 'いいえ',
+          'custom_mock-q2': '体調を優先して一日きちんと休むと決めた',
           'morning': '体調を整えるため終日休養',
           'afternoon': '録画していた映画を観た',
           'evening': '早めに就寝',
