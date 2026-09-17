@@ -450,9 +450,20 @@ class _RecordsTable extends StatelessWidget {
   static const _fixedHeaders = ['日付', '食事', '運動', '勉強'];
   static const _fixedKeys = ['food', 'exercise', 'study'];
 
+  // 安定ID導入（#163）以前に保存された回答キー（例: custom_0, custom_1）の形式。
+  // 導入後のキーは custom_<uuid> であり数字のみにはならないため、これで新旧を判別できる。
+  static final _legacyCustomKeyPattern = RegExp(r'^custom_\d+$');
+
   // カスタム質問ラベルを最大10文字に切り詰める
   String _truncate(String s, int max) =>
       s.length > max ? '${s.substring(0, max)}…' : s;
+
+  // その日の回答に、安定ID導入前の形式のカスタム質問キーが残っているか
+  // （#164: 質問の並び替え等で紐付けが変わっている可能性がある古いデータ）
+  bool _hasLegacyCustomAnswers(Map<String, dynamic>? answers) {
+    if (answers == null) return false;
+    return answers.keys.any((k) => _legacyCustomKeyPattern.hasMatch(k));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -491,16 +502,34 @@ class _RecordsTable extends StatelessWidget {
                 entriesData[date]?['answers'] as Map<String, dynamic>?;
             final parts = date.split('-');
             final dateLabel = '${parts[1]}/${parts[2]}';
+            final hasLegacyCustomAnswers = _hasLegacyCustomAnswers(answers);
 
             final fixedCells = [
               DataCell(
-                Text(
-                  dateLabel,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: c.textPrimary,
-                    fontSize: 12,
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      dateLabel,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: c.textPrimary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (hasLegacyCustomAnswers) ...[
+                      const SizedBox(width: 4),
+                      Tooltip(
+                        message: 'この日のカスタム質問の回答は、質問の追加・削除・並べ替え'
+                            'によって現在の質問と正しく紐付いていない可能性があります',
+                        child: Icon(
+                          Icons.warning_amber_rounded,
+                          size: 14,
+                          color: c.gold,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               ..._fixedKeys.map((key) {
