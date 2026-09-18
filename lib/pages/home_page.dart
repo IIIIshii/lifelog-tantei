@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
+import '../models/mbti_type.dart';
+import '../models/self_analysis.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 import '../widgets/case_archive_tile.dart';
 import 'diary_detail_page.dart';
 import 'diary_page.dart';
+import 'self_analysis_page.dart';
 
 // ストリーク算出とヒートマップに使う遡り日数。
 // 7日ぶんのヒートマップには足りるが、連続日数はここが上限になるため余裕を持たせている。
@@ -62,6 +65,7 @@ class _HomePageState extends State<HomePage> {
   bool _loading = true;
   bool _failed = false;
   Role _role = roleFor(null);
+  SelfAnalysis _selfAnalysis = SelfAnalysis.defaults();
   Set<String> _written = const {};
   String? _todayDiary;
   List<MapEntry<String, Map<String, dynamic>>> _recent = const [];
@@ -87,10 +91,12 @@ class _HomePageState extends State<HomePage> {
   Future<void> _load() async {
     final entriesFuture = _firestore.getRecentEntries(widget.uid, _lookbackDays);
     final settingsFuture = _firestore.getUserSettings(widget.uid);
+    final selfAnalysisFuture = _firestore.getSelfAnalysis(widget.uid);
 
     try {
       final entries = await entriesFuture;
       final settings = await settingsFuture;
+      final selfAnalysis = await selfAnalysisFuture;
       if (!mounted) return;
 
       // diary が非 null のものだけを「記録済み」とみなす。
@@ -113,6 +119,7 @@ class _HomePageState extends State<HomePage> {
         _recent = withDiary.where((e) => e.key != todayKey).toList();
         _todayDiary = todayDiary;
         _role = roleFor(settings.selectedRole);
+        _selfAnalysis = selfAnalysis;
         _loading = false;
         _failed = false;
       });
@@ -141,6 +148,18 @@ class _HomePageState extends State<HomePage> {
           )
         : MaterialPageRoute<void>(builder: (_) => const DiaryPage());
     Navigator.push(context, route).then((_) => _load());
+  }
+
+  // 捜査資料カードのタップ：自己分析ページへ。
+  // ホームから push するので、戻ってきたら _load() でカードの表示を取り直す
+  // （MainShell の _homeRefresh はタブ切り替え用なのでここでは使わない）。
+  void _openSelfAnalysis() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => SelfAnalysisPage(uid: widget.uid),
+      ),
+    ).then((_) => _load());
   }
 
   @override
@@ -212,6 +231,26 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               ),
+
+            // ── 捜査資料（依頼人自身の情報） ────────────────
+            // 事件そのものではなく「誰の事件簿か」を扱う区画。
+            // 自己分析の項目が増えたらここにカードを足していく。
+            const SliverPadding(
+              padding: EdgeInsets.fromLTRB(20, 28, 20, 12),
+              sliver: SliverToBoxAdapter(
+                child: _SectionLabel('捜査資料', icon: Icons.badge_outlined),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverToBoxAdapter(
+                child: _SelfAnalysisTile(
+                  loading: _loading,
+                  selfAnalysis: _selfAnalysis,
+                  onTap: _openSelfAnalysis,
+                ),
+              ),
+            ),
 
             // ── 直近の事件 ──────────────────────────────────
             const SliverPadding(
@@ -586,15 +625,16 @@ class _WeekHeatmap extends StatelessWidget {
 // セクション見出し。ゴールドの小見出し＋罫線で書類の章立てに見せる。
 class _SectionLabel extends StatelessWidget {
   final String text;
+  final IconData icon;
 
-  const _SectionLabel(this.text);
+  const _SectionLabel(this.text, {this.icon = Icons.folder_open});
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     return Row(
       children: [
-        Icon(Icons.folder_open, size: 14, color: c.gold),
+        Icon(icon, size: 14, color: c.gold),
         const SizedBox(width: 6),
         Flexible(
           child: Text(
@@ -639,6 +679,124 @@ class _EmptyRecent extends StatelessWidget {
             style: TextStyle(fontSize: 13, color: c.textSecondary),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// 自己分析（依頼人の人物像）へのタイル
+//
+// CaseArchiveTile と同じ「左端ゴールド帯＋見出し＋副文＋矢印」の書類風にして、
+// 直近の事件リストと並んだときに同じ資料棚に見えるようにする。
+// 未登録のときは何を登録する場所なのかが分かる副文を出す。
+// ──────────────────────────────────────────────────────────────
+class _SelfAnalysisTile extends StatelessWidget {
+  final bool loading;
+  final SelfAnalysis selfAnalysis;
+  final VoidCallback onTap;
+
+  const _SelfAnalysisTile({
+    required this.loading,
+    required this.selfAnalysis,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final type = mbtiTypeFor(selfAnalysis.mbti);
+    final String subtitle;
+    if (loading) {
+      subtitle = '照会中…';
+    } else if (type != null) {
+      subtitle = '${type.key}（${type.label}）';
+    } else {
+      subtitle = '依頼人の人物像はまだ白紙だ。';
+    }
+
+    return Material(
+      color: c.cardBg,
+      shape: RoundedRectangleBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(4)),
+        side: BorderSide(color: c.cardBorder),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(4)),
+        ),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 左端のゴールドアクセントボーダー
+              Container(
+                width: 4,
+                decoration: BoxDecoration(
+                  color: c.gold,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(4),
+                    bottomLeft: Radius.circular(4),
+                  ),
+                ),
+              ),
+
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.psychology_outlined,
+                            size: 14,
+                            color: c.gold,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              '自己分析',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: c.gold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: c.textSecondary,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // 右端の矢印アイコン
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Icon(Icons.chevron_right, color: c.gold, size: 20),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

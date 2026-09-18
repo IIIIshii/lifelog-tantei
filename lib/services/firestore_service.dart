@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/self_analysis.dart';
 import 'package:flutter/foundation.dart';
 import '../models/user_settings.dart';
 
@@ -576,5 +577,31 @@ class FirestoreService {
         .collection('analyses')
         .doc('today')
         .set({'text': text, 'generatedAt': FieldValue.serverTimestamp()});
+  }
+
+  // ユーザーの自己分析（MBTI等）を取得する（存在しなければデフォルト＝未登録を返す）
+  // 保存先を settings/preferences と分けているのは、記録の設定ではなく依頼人本人の属性であり、
+  // 今後 MBTI 以外の項目を足していく前提のため。
+  Future<SelfAnalysis> getSelfAnalysis(String uid) async {
+    final doc = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('self-analysis')
+        .doc('profile')
+        .get();
+    if (doc.exists && doc.data() != null) {
+      return SelfAnalysis.fromMap(doc.data()!);
+    }
+    return SelfAnalysis.defaults();
+  }
+
+  // ユーザーの自己分析をFirestoreに保存する
+  Future<void> saveSelfAnalysis(String uid, SelfAnalysis selfAnalysis) async {
+    await _db
+        .collection('users')
+        .doc(uid)
+        .collection('self-analysis')
+        .doc('profile')
+        .set(selfAnalysis.toMap());
   }
 }
