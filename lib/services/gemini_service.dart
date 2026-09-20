@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import '../models/goal.dart';
 import '../models/self_analysis.dart';
 import '../prompts/ai_instructions.dart';
 import '../prompts/diary_prompts.dart';
+import '../prompts/goal_prompts.dart';
 import '../roles/roles.dart';
 
 // Gemini APIとのやり取りを担当するサービスクラス。
@@ -18,6 +20,8 @@ class GeminiService {
   final GenerativeModel _reactionModel;
   // 過去ログを読み、今日の日記を書くための質問リストを返すモデル。
   final GenerativeModel _memoryQuestionModel;
+  // 相談室で目標を詰めるモデル。返答と見立てを構造化して返す。
+  final GenerativeModel _consultModel;
 
   final String _role;
 
@@ -111,6 +115,69 @@ class GeminiService {
               ),
             },
             requiredProperties: ['questions'],
+          ),
+        ),
+      ),
+      // 相談室で目標を詰めるモデル。人格はインタビュアーと同じ。
+      // 返答（reply）と見立て（title 以下）を1回の応答でまとめて受け取るため、
+      // 入れ子の任意オブジェクトにはせず全キー必須のフラットな形にしている
+      // ―― 未確定のときは空文字・空配列が返るだけで、読み取り側の分岐が増えない。
+      _consultModel = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: apiKey,
+        systemInstruction: Content.system(
+          '${roleFor(role).interviewerInstruction}$interviewProfile',
+        ),
+        generationConfig: GenerationConfig(
+          responseMimeType: 'application/json',
+          responseSchema: Schema.object(
+            properties: {
+              'reply': Schema.string(
+                description: '依頼人への返答。人格を保った1〜3文。問いかけは1つまで',
+              ),
+              'ready': Schema.boolean(description: '目標の見立てを提案できる状態か'),
+              'title': Schema.string(description: '目標の一文。数字と期間を含める。未確定なら空文字'),
+              'metric': Schema.string(description: '何がどうなったら達成かの基準。未確定なら空文字'),
+              'deadline': Schema.string(
+                description: '期限。YYYY-MM-DD 形式。決まっていなければ空文字',
+              ),
+              'actions': Schema.array(
+                // 件数はプロンプトの【記録枠】で毎回伝える。responseSchema は
+                // コンストラクタで一度だけ作られるため、ここに件数を書けない。
+                description: '毎日の記録で追う項目。件数は指示文の【記録枠】に従う。未確定なら空配列',
+                items: Schema.object(
+                  properties: {
+                    'label': Schema.string(
+                      description: '記録する項目の名前。例「体重」「ジムに行く」',
+                    ),
+                    'type': Schema.enumString(
+                      enumValues: ['numeric', 'check'],
+                      description: 'numeric=数字を記録 / check=やったかどうかを記録',
+                    ),
+                    'unit': Schema.string(
+                      description: 'numeric の単位。kg・歩・分など。check は空文字',
+                    ),
+                    'target': Schema.number(
+                      description: 'numeric の目標値。決めないなら 0',
+                    ),
+                  },
+                  requiredProperties: ['label', 'type', 'unit', 'target'],
+                ),
+              ),
+              'questions': Schema.array(
+                description: '独自質問リストへ提案する問いを3〜5件。未確定なら空配列',
+                items: Schema.string(description: '日々の記録で投げかける質問1件'),
+              ),
+            },
+            requiredProperties: [
+              'reply',
+              'ready',
+              'title',
+              'metric',
+              'deadline',
+              'actions',
+              'questions',
+            ],
           ),
         ),
       );
@@ -267,4 +334,83 @@ class GeminiService {
     ]);
     return response.text?.trim() ?? 'コメントを生成できませんでした。';
   }
+
+  // 相談室の会話から、探偵の返答と（まとまっていれば）目標の見立てを生成させる。
+  //
+  // 戻り値の goal は ready が true のときだけ非 null。
+  // today には 'YYYY-MM-DD' を渡す（Goal.createdAt になる。日付の生成は呼び出し側の責務）。
+  // target は見直す対象の目標。新しく立てるときは null。
+  // otherGoals は同時に追っている他の目標（同じ狙いの事件を重ねて立てさせないため）。
+  // actionBudget は毎日の記録に加えられる行動項目の残り枠。
+  // forcePropose は「これで目標にする」を押されたとき。材料が足りなくても案を出させる。
+  //
+  // 目標を文字列ではなく Goal のまま受けるのは、要約の作り方と件数の決め方を
+  // この層にまとめ、呼び出し側がプロンプトの形を知らずに済むようにするため
+  // （GoalPrompts を呼ぶのはもともとこの層の仕事）。
+  //
+  // JSONパースに失敗しても会話は止めず、聞き返しを返す
+  // （generateFollowUp が sufficient:true に倒して先へ進めるのと同じ、流れを止めない方針）。
+  Future<({bool ready, String reply, Goal? goal})> consultGoal(
+    List<Map<String, String>> messages, {
+    required String today,
+    Goal? target,
+    List<Goal> otherGoals = const [],
+    int actionBudget = kMaxGoalActions,
+    bool forcePropose = false,
+  }) async {
+    // 残り枠が広くても、1目標あたりの上限は超えさせない
+    final budget = actionBudget.clamp(0, kMaxGoalActions);
+    final hint =
+        AiInstructions.goalCoachHint(roleFor(_role).interviewerInstruction) +
+        AiInstructions.goalActionBudgetHint(budget) +
+        (forcePropose ? AiInstructions.goalForceProposeHint() : '');
+    final body = GoalPrompts.buildConsultPrompt(
+      _buildHistory(messages),
+      targetGoalSummary: target?.promptSummary() ?? '',
+      otherGoalsSummary: otherGoals
+          .map((goal) => goal.promptHeadline())
+          .where((line) => line.isNotEmpty)
+          .join('\n'),
+    );
+    final response = await _consultModel.generateContent([
+      Content.text('$hint\n\n$body'),
+    ]);
+    final text = response.text?.trim() ?? '';
+
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map<String, dynamic>) {
+        final reply = (decoded['reply'] as String?)?.trim() ?? '';
+        if (decoded['ready'] == true) {
+          final goal = Goal.fromAiMap(
+            decoded,
+            createdAt: today,
+            maxActions: budget,
+          );
+          // タイトルが無ければ提案として成立しないので、会話の継続に倒す
+          if (!goal.isEmpty) {
+            return (
+              ready: true,
+              reply: reply.isNotEmpty ? reply : '筋書きはこうだ。',
+              goal: goal,
+            );
+          }
+        }
+        return (
+          ready: false,
+          reply: reply.isNotEmpty ? reply : _consultFallbackReply,
+          goal: null,
+        );
+      }
+    } catch (_) {
+      // 応答を読み取れないときは聞き返して会話を続ける
+    }
+    return (ready: false, reply: _consultFallbackReply, goal: null);
+  }
+
+  // 応答を読み取れなかったときの聞き返し。
+  // ロールの口調には寄せない ―― 人格文面は lib/roles/ に集約しており、
+  // サービス層がキャラクターの台詞を持ち始めると置き場所が二重になるため、
+  // どのロールでも不自然でない最小限の一文にとどめる。
+  static const String _consultFallbackReply = 'すまない、今の話を掴み損ねた。もう一度聞かせてくれ。';
 }

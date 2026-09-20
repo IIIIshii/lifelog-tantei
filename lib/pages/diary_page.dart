@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
+import '../core/numeric_answer.dart';
+import '../models/goal.dart';
 import '../models/user_settings.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
@@ -105,6 +107,9 @@ class _DiaryPageState extends State<DiaryPage> {
   // 選択中の探偵ロール。質問文・ナレーションの文面はこのロール定義から引く。
   // 設定値（selectedRole）が未知でも roleFor() がデフォルトロールへフォールバックする。
   late Role _currentRole;
+
+  // 追跡中の目標。行動項目をこの捜査の質問キューへ積むために持つ。
+  List<Goal> _goals = const [];
 
   int _totalQuestions = 0;
   int _answeredQuestionCount = 0;
@@ -246,8 +251,10 @@ class _DiaryPageState extends State<DiaryPage> {
   Future<UserSettings> _initGemini() async {
     final settingsFuture = _firestore.getUserSettings(_uid!);
     final selfAnalysisFuture = _firestore.getSelfAnalysis(_uid!);
+    final goalsFuture = _firestore.getGoals(_uid!);
     final settings = await settingsFuture;
     final selfAnalysis = await selfAnalysisFuture;
+    _goals = await goalsFuture;
     _currentRole = roleFor(settings.selectedRole);
     _gemini = GeminiService(
       _apiKey,
@@ -314,9 +321,31 @@ class _DiaryPageState extends State<DiaryPage> {
       );
     }
     for (final question in settings.customQuestions) {
-      _customQueue.add(
-        _Question(question.text, key: 'custom_${question.id}'),
-      );
+      _customQueue.add(_Question(question.text, key: 'custom_${question.id}'));
+    }
+
+    // ── 追跡中の目標の行動項目 ──
+    // 専用フェーズを作らず、カスタム質問と同じキューの先頭に積む。
+    // こうすることでスキップ・進捗バー・「この内容も報告書に含めるか」の確認が
+    // そのまま効き、質問フローに分岐を増やさずに済む。
+    // 先頭に置くのは、今日の主題だから（他の記録項目より先に聞く）。
+    //
+    // 目標が複数あるときは、目標の並び（新しい順）のまま各目標の項目を
+    // 定義順に並べて1本の列にしてから積む。目標ごとに reversed + addFirst すると
+    // 項目の順は保てても目標の順だけが逆転するので、平らにしてから一度だけ反転させる。
+    final goalQuestions = [
+      for (final goal in _goals)
+        for (final action in goal.actions)
+          _Question(
+            action.questionText(),
+            choices: action.isNumeric ? null : const [kGoalDone, kGoalNotDone],
+            key: action.answerKey,
+          ),
+    ].take(kMaxTotalGoalActions);
+    // 上限は相談室で守っているが、上限を入れる前のデータで溢れていても
+    // 尋問だけは長くしない
+    for (final question in goalQuestions.toList().reversed) {
+      _customQueue.addFirst(question);
     }
 
     // ── 思い出しアシストキュー ──
@@ -413,7 +442,8 @@ class _DiaryPageState extends State<DiaryPage> {
         final hasCustomAnswers = _answers.keys.any(
           (k) =>
               ['sleep', 'food', 'exercise', 'study'].contains(k) ||
-              k.startsWith('custom_'),
+              k.startsWith('custom_') ||
+              k.startsWith(kGoalAnswerPrefix),
         );
         if (hasCustomAnswers) {
           _postAiMessage(
@@ -532,6 +562,11 @@ class _DiaryPageState extends State<DiaryPage> {
       if (_pendingKey == 'sleep') {
         final hours = _parseSleepHours(text);
         if (hours != null) _numericAnswers['sleep'] = hours;
+      } else if (_pendingKey!.startsWith(kGoalAnswerPrefix)) {
+        // 目標の数値項目。チェック項目（達成／未達）は数値にならず null が返るだけで、
+        // 回答文字列は上で記録済みなので素通りさせてよい。
+        final value = parseNumericAnswer(text);
+        if (value != null) _numericAnswers[_pendingKey!] = value;
       }
 
       _answeredQuestionCount++;
@@ -946,6 +981,17 @@ class _DiaryPageState extends State<DiaryPage> {
       _answers.keys.where((k) => k.startsWith('custom_')).forEach((k) {
         lines.add('カスタム: ${_answers[k]}');
       });
+      // 目標の回答は、何の項目かが分かる形で渡す
+      // （キーだけ渡すと 'カスタム:' と同じく、AI から中身が見えなくなる）。
+      // 目標名も添えるのは、別々の目標に同じ「体重」があるとき、項目名だけでは
+      // どちらの記録か区別が付かないため。回答キーは uuid なので衝突しないが、
+      // ラベルは衝突する。
+      for (final goal in _goals) {
+        goal.answerLabels().forEach((key, label) {
+          final answer = _answers[key];
+          if (answer != null) lines.add('目標「${goal.title}」の「$label」: $answer');
+        });
+      }
     }
     if (_includeRecallInDiary) {
       for (final k in ['morning', 'afternoon', 'evening']) {
@@ -1152,7 +1198,8 @@ class _DiaryPageState extends State<DiaryPage> {
     }
     // タイプ中は回答手段を出さない（質問が出きる前に答えられてしまわないように）
     final isTyping = typingIndex != null;
-    final showChoices = !_diaryGenerated &&
+    final showChoices =
+        !_diaryGenerated &&
         !_isLoading &&
         !isTyping &&
         lastIsAI &&

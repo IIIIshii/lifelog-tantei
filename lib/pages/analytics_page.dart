@@ -5,6 +5,8 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
+import '../core/goal_progress.dart';
+import '../models/goal.dart';
 import '../models/user_settings.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
@@ -29,6 +31,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   // YYYY-MM-DD → エントリ全データ
   final Map<String, Map<String, dynamic>> _entriesData = {};
   UserSettings? _settings;
+  List<Goal> _goals = const [];
   _AnalyticsSummary? _summary;
   String? _analysisText;
   String? _dailyAnalysisText;
@@ -53,11 +56,13 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       final analysisFuture = _firestore.getLatestAnalysis(uid);
       final dailyCommentFuture = _firestore.getTodayComment(uid);
       final selfAnalysisFuture = _firestore.getSelfAnalysis(uid);
+      final goalsFuture = _firestore.getGoals(uid);
       final entries = await entriesFuture;
       final settings = await settingsFuture;
       final analysis = await analysisFuture;
       final dailyComment = await dailyCommentFuture;
       final selfAnalysis = await selfAnalysisFuture;
+      final goals = await goalsFuture;
 
       final sleepData = <String, double?>{};
       final entriesData = <String, Map<String, dynamic>>{};
@@ -78,10 +83,19 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         selfAnalysis: selfAnalysis,
       );
 
+      if (!mounted) return;
       setState(() {
-        _sleepData.addAll(sleepData);
-        _entriesData.addAll(entriesData);
+        // 引き直したときに期間から外れた古い日付が残らないよう、毎回入れ替える。
+        // 初回1回きりだった頃は addAll で足りていたが、再読込できるようにした以上
+        // 蓄積させると所見へ14日より前のエントリが混ざる。
+        _sleepData
+          ..clear()
+          ..addAll(sleepData);
+        _entriesData
+          ..clear()
+          ..addAll(entriesData);
         _settings = settings;
+        _goals = goals;
         _summary = summary;
         if (analysis != null) {
           _analysisText = analysis['text'] as String?;
@@ -94,7 +108,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           if (ts is Timestamp) {
             final generated = ts.toDate();
             final now = DateTime.now();
-            final isToday = generated.year == now.year &&
+            final isToday =
+                generated.year == now.year &&
                 generated.month == now.month &&
                 generated.day == now.day;
             if (isToday) {
@@ -109,6 +124,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         _isLoading = false;
       });
     } catch (_) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
     }
   }
@@ -239,53 +255,84 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: c.gold))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _SectionHeader(title: '探偵の所見', subtitle: '直近$_days日間'),
-                  const SizedBox(height: 16),
-                  _AiInsightSection(
-                    text: _analysisText,
-                    generatedAt: _analysisGeneratedAt,
-                    isLoading: _isGeneratingAnalysis,
-                    onGenerate: _generateAnalysis,
-                  ),
-                  const SizedBox(height: 32),
-                  _SectionHeader(title: '今日の行動', subtitle: '本日分'),
-                  const SizedBox(height: 16),
-                  _AiInsightSection(
-                    text: _dailyAnalysisText,
-                    generatedAt: _dailyAnalysisGeneratedAt,
-                    isLoading: _isGeneratingDailyAnalysis,
-                    onGenerate: _generateDailyAnalysis,
-                  ),
-                  const SizedBox(height: 32),
-                  _SectionHeader(title: 'サマリー', subtitle: '直近$_days日間'),
-                  const SizedBox(height: 16),
-                  _SummaryCards(summary: _summary),
-                  const SizedBox(height: 32),
-                  if (_summary != null &&
-                      (_summary!.emotionDistribution.isNotEmpty ||
-                          _summary!.placeDistribution.isNotEmpty)) ...[
-                    _SectionHeader(title: '出来事の傾向', subtitle: '感情・場所の分布'),
+          : RefreshIndicator(
+              color: c.gold,
+              backgroundColor: c.cardBg,
+              onRefresh: _loadData,
+              child: SingleChildScrollView(
+                // 中身が画面に収まっているときも引っ張って更新できるようにする
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SectionHeader(title: '探偵の所見', subtitle: '直近$_days日間'),
                     const SizedBox(height: 16),
-                    _DistributionCharts(summary: _summary!),
+                    _AiInsightSection(
+                      text: _analysisText,
+                      generatedAt: _analysisGeneratedAt,
+                      isLoading: _isGeneratingAnalysis,
+                      onGenerate: _generateAnalysis,
+                    ),
                     const SizedBox(height: 32),
+                    _SectionHeader(title: '今日の行動', subtitle: '本日分'),
+                    const SizedBox(height: 16),
+                    _AiInsightSection(
+                      text: _dailyAnalysisText,
+                      generatedAt: _dailyAnalysisGeneratedAt,
+                      isLoading: _isGeneratingDailyAnalysis,
+                      onGenerate: _generateDailyAnalysis,
+                    ),
+                    const SizedBox(height: 32),
+                    _SectionHeader(title: 'サマリー', subtitle: '直近$_days日間'),
+                    const SizedBox(height: 16),
+                    _SummaryCards(summary: _summary),
+                    const SizedBox(height: 32),
+                    // 目標を追っていないときはセクションごと消える
+                    if (_goals.isNotEmpty) ...[
+                      _SectionHeader(
+                        title: '追跡中の目標',
+                        subtitle: '${_goals.length}件 / 直近$_days日間',
+                      ),
+                      const SizedBox(height: 16),
+                      // 見出しは1つに留め、目標ごとの区切りは罫線で表す。
+                      // _GoalProgressSection が先頭に目標名を出すので、同じ見出しを
+                      // 繰り返すと「追跡中の目標」が何度も並び、どこまでが1件か
+                      // 分からなくなる。
+                      for (var i = 0; i < _goals.length; i++) ...[
+                        if (i > 0) ...[
+                          const SizedBox(height: 24),
+                          Divider(height: 1, color: c.cardBorder),
+                          const SizedBox(height: 24),
+                        ],
+                        _GoalProgressSection(
+                          goal: _goals[i],
+                          entries: _entriesData.entries.toList(growable: false),
+                        ),
+                      ],
+                      const SizedBox(height: 32),
+                    ],
+                    if (_summary != null &&
+                        (_summary!.emotionDistribution.isNotEmpty ||
+                            _summary!.placeDistribution.isNotEmpty)) ...[
+                      _SectionHeader(title: '出来事の傾向', subtitle: '感情・場所の分布'),
+                      const SizedBox(height: 16),
+                      _DistributionCharts(summary: _summary!),
+                      const SizedBox(height: 32),
+                    ],
+                    _SectionHeader(title: '睡眠時間', subtitle: '直近$_days日間'),
+                    const SizedBox(height: 16),
+                    _SleepChart(dates: dates, sleepData: _sleepData),
+                    const SizedBox(height: 32),
+                    _SectionHeader(title: '活動記録', subtitle: '直近$_days日間'),
+                    const SizedBox(height: 16),
+                    _RecordsTable(
+                      dates: dates.reversed.toList(), // 新しい順
+                      entriesData: _entriesData,
+                      customQuestions: _settings?.customQuestions ?? [],
+                    ),
                   ],
-                  _SectionHeader(title: '睡眠時間', subtitle: '直近$_days日間'),
-                  const SizedBox(height: 16),
-                  _SleepChart(dates: dates, sleepData: _sleepData),
-                  const SizedBox(height: 32),
-                  _SectionHeader(title: '活動記録', subtitle: '直近$_days日間'),
-                  const SizedBox(height: 16),
-                  _RecordsTable(
-                    dates: dates.reversed.toList(), // 新しい順
-                    entriesData: _entriesData,
-                    customQuestions: _settings?.customQuestions ?? [],
-                  ),
-                ],
+                ),
               ),
             ),
     );
@@ -473,8 +520,9 @@ class _RecordsTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final customHeaders =
-        customQuestions.map((q) => _truncate(q.text, 10)).toList();
+    final customHeaders = customQuestions
+        .map((q) => _truncate(q.text, 10))
+        .toList();
     final allHeaders = [..._fixedHeaders, ...customHeaders];
 
     return Container(
@@ -525,7 +573,8 @@ class _RecordsTable extends StatelessWidget {
                     if (hasLegacyCustomAnswers) ...[
                       const SizedBox(width: 4),
                       Tooltip(
-                        message: 'この日のカスタム質問の回答は、質問の追加・削除・並べ替え'
+                        message:
+                            'この日のカスタム質問の回答は、質問の追加・削除・並べ替え'
                             'によって現在の質問と正しく紐付いていない可能性があります',
                         child: Icon(
                           Icons.warning_amber_rounded,
@@ -714,6 +763,106 @@ class _SummaryCards extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// 追跡中の目標の進捗
+//
+// 行動項目ごとに1枚ずつカードを出す。チェック項目は達成率、数値項目は最新値。
+// どちらも記録が無ければ「—」を出して「0%」「0」と区別する
+// ―― まだ測っていないことと、測って0だったことは意味が違う。
+//
+// 数値の推移グラフは MVP では作らない。睡眠用の _SleepChart は maxY 固定の
+// 睡眠専用で流用できず、汎用のグラフは項目ごとのスケール決めが要るため。
+// ────────────────────────────────────────────────────────────
+class _GoalProgressSection extends StatelessWidget {
+  final Goal goal;
+  final List<MapEntry<String, Map<String, dynamic>>> entries;
+
+  const _GoalProgressSection({required this.goal, required this.entries});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 目標そのもの。_SectionHeader の subtitle に入れると
+        // 長いタイトルで見出し行が崩れるため、中身の先頭に置く。
+        Text(
+          goal.title,
+          style: DetectiveTextStyles.cardTitle(
+            color: c.textPrimary,
+          ).copyWith(fontSize: 15),
+        ),
+        if (goal.metric.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            goal.metric,
+            style: TextStyle(fontSize: 12, color: c.textSecondary, height: 1.4),
+          ),
+        ],
+        const SizedBox(height: 4),
+        Text(
+          _elapsedLabel(),
+          style: TextStyle(fontSize: 11, color: c.textSecondary),
+        ),
+        const SizedBox(height: 14),
+        if (goal.actions.isEmpty)
+          _EmptyCard(message: '毎日追う項目は設定されていない')
+        else
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // 横幅に応じてカード幅を調整（_SummaryCards と同じ組み方）
+              const spacing = 12.0;
+              final available = constraints.maxWidth;
+              final cardWidth = available >= 4 * 160 + 3 * spacing
+                  ? (available - 3 * spacing) / 4
+                  : (available - spacing) / 2;
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: [
+                  for (final action in goal.actions)
+                    SizedBox(
+                      width: cardWidth,
+                      child: _StatCard(
+                        label: action.label,
+                        value: _valueFor(action),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  // 「着手から n 日目」。createdAt が無い古いデータでは経過を出さない。
+  String _elapsedLabel() {
+    if (goal.createdAt.isEmpty) return '着手日は記録されていない';
+    final days = daysSince(goal.createdAt, DateTime.now());
+    final deadline = goal.deadline.isEmpty ? '' : ' / 期限 ${goal.deadline}';
+    return '着手から$days日$deadline';
+  }
+
+  // カードに出す値。記録が無ければ「—」。
+  String _valueFor(GoalAction action) {
+    if (action.isNumeric) {
+      final latest = latestNumeric(entries, action.answerKey);
+      if (latest == null) return '—';
+      // 整数で記録されたものに .0 を付けない（8000歩 を 8000.0歩 と出さない）
+      final text = latest == latest.roundToDouble()
+          ? latest.toStringAsFixed(0)
+          : latest.toStringAsFixed(1);
+      return action.unit.isEmpty ? text : '$text${action.unit}';
+    }
+    final rate = checkRate(entries, action.answerKey);
+    if (rate == null) return '—';
+    return '${(rate * 100).round()}%';
   }
 }
 

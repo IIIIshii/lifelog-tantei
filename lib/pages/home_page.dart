@@ -1,16 +1,22 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../core/goal_progress.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
+import '../models/goal.dart';
 import '../models/mbti_type.dart';
 import '../models/self_analysis.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 import '../widgets/case_archive_tile.dart';
+import '../widgets/goal_case_tile.dart';
+import '../widgets/section_label.dart';
+import '../widgets/status_badge.dart';
 import 'diary_detail_page.dart';
 import 'diary_page.dart';
+import 'role_select_page.dart';
 import 'self_analysis_page.dart';
 
 // ストリーク算出とヒートマップに使う遡り日数。
@@ -43,16 +49,16 @@ class HomePage extends StatefulWidget {
   /// 読み込み前は null。
   final ValueNotifier<bool?> todayDone;
 
-  /// ヒーローカードの「担当探偵」行から探偵タブへ移動するためのコールバック。
+  /// 「追跡中の事件」から相談室タブへ移動するためのコールバック。
   /// タブの index は MainShell の関心事なので、ここでは持たない。
-  final VoidCallback onOpenRoleTab;
+  final VoidCallback onOpenConsultTab;
 
   const HomePage({
     super.key,
     required this.uid,
     required this.refreshSignal,
     required this.todayDone,
-    required this.onOpenRoleTab,
+    required this.onOpenConsultTab,
   });
 
   @override
@@ -66,6 +72,8 @@ class _HomePageState extends State<HomePage> {
   bool _failed = false;
   Role _role = roleFor(null);
   SelfAnalysis _selfAnalysis = SelfAnalysis.defaults();
+  List<Goal> _goals = const [];
+  Set<String> _recordedGoalIds = const {}; // 今日、項目に答えた目標の id
   Set<String> _written = const {};
   String? _todayDiary;
   List<MapEntry<String, Map<String, dynamic>>> _recent = const [];
@@ -89,14 +97,19 @@ class _HomePageState extends State<HomePage> {
   // 「今日書いたか」は getRecentEntries の結果に今日の日付が含まれるかで判定できるため、
   // getTodayDiary を別途呼ばずに Firestore の読み取り回数を増やさない。
   Future<void> _load() async {
-    final entriesFuture = _firestore.getRecentEntries(widget.uid, _lookbackDays);
+    final entriesFuture = _firestore.getRecentEntries(
+      widget.uid,
+      _lookbackDays,
+    );
     final settingsFuture = _firestore.getUserSettings(widget.uid);
     final selfAnalysisFuture = _firestore.getSelfAnalysis(widget.uid);
+    final goalsFuture = _firestore.getGoals(widget.uid);
 
     try {
       final entries = await entriesFuture;
       final settings = await settingsFuture;
       final selfAnalysis = await selfAnalysisFuture;
+      final goals = await goalsFuture;
       if (!mounted) return;
 
       // diary が非 null のものだけを「記録済み」とみなす。
@@ -114,12 +127,25 @@ class _HomePageState extends State<HomePage> {
         }
       }
 
+      // 目標の記録有無は diary の有無とは別に見る。
+      // 行動項目だけ答えて日記を作っていない日も「今日は記録した」なので、
+      // 絞り込み前の entries から今日のドキュメントを拾う。
+      Map<String, dynamic>? todayEntry;
+      for (final e in entries) {
+        if (e.key == todayKey) {
+          todayEntry = e.value;
+          break;
+        }
+      }
+
       setState(() {
         _written = withDiary.map((e) => e.key).toSet();
         _recent = withDiary.where((e) => e.key != todayKey).toList();
         _todayDiary = todayDiary;
         _role = roleFor(settings.selectedRole);
         _selfAnalysis = selfAnalysis;
+        _goals = goals;
+        _recordedGoalIds = goalsRecordedIn(todayEntry, goals);
         _loading = false;
         _failed = false;
       });
@@ -148,6 +174,16 @@ class _HomePageState extends State<HomePage> {
           )
         : MaterialPageRoute<void>(builder: (_) => const DiaryPage());
     Navigator.push(context, route).then((_) => _load());
+  }
+
+  // 担当探偵の行のタップ：ロール選択ページへ。
+  // 探偵はボトムナビのタブではなくなったので、設定タブへ飛ばして一覧から
+  // 探させるのではなく、ここから直接 push する（タップ先を変えない）。
+  void _openRoleSelect() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const RoleSelectPage()),
+    ).then((_) => _load());
   }
 
   // 捜査資料カードのタップ：自己分析ページへ。
@@ -187,7 +223,9 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 2),
             Text(
               '― 事件、受け付けます ―',
-              style: DetectiveTextStyles.appBarSubtitle(color: c.appBarSubtitle),
+              style: DetectiveTextStyles.appBarSubtitle(
+                color: c.appBarSubtitle,
+              ),
             ),
           ],
         ),
@@ -216,7 +254,7 @@ class _HomePageState extends State<HomePage> {
                   weekFlags: recentDayFlags(_written, today, 7),
                   streak: calcStreak(_written, today),
                   onTapCard: _openToday,
-                  onTapRole: widget.onOpenRoleTab,
+                  onTapRole: _openRoleSelect,
                 ),
               ),
             ),
@@ -232,13 +270,52 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
 
+            // ── 追跡中の事件（目標） ────────────────────────
+            // 今日なにをするかに直接効く情報なので、依頼人の属性を扱う
+            // 「捜査資料」より前、本日の事件のすぐ下に置く。
+            const SliverPadding(
+              padding: EdgeInsets.fromLTRB(20, 28, 20, 12),
+              sliver: SliverToBoxAdapter(
+                child: SectionLabel('追跡中の事件', icon: Icons.flag_outlined),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: _loading || _goals.isEmpty
+                  // 読み込み中も未設定も1枚で受ける。未設定でもタップできるように
+                  // するのは、「立てる場所がある」こと自体をホームで伝えたいため。
+                  ? SliverToBoxAdapter(
+                      child: _GoalNoticeTile(
+                        message: _loading
+                            ? '照会中…'
+                            : _role.text('goal_empty', '追うべき事件は、まだ決まっていない。'),
+                        onTap: widget.onOpenConsultTab,
+                      ),
+                    )
+                  : SliverList.separated(
+                      itemCount: _goals.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final goal = _goals[index];
+                        return GoalCaseTile(
+                          goal: goal,
+                          recordedToday: _recordedGoalIds.contains(goal.id),
+                          // どれを押しても行き先は同じ相談室タブ。個別の事件を
+                          // 直接開かないのは、切り替えた先でどれを選ぶかを見せた方が
+                          // 「他にも追っている事件がある」ことが伝わるため。
+                          onTap: widget.onOpenConsultTab,
+                        );
+                      },
+                    ),
+            ),
+
             // ── 捜査資料（依頼人自身の情報） ────────────────
             // 事件そのものではなく「誰の事件簿か」を扱う区画。
             // 自己分析の項目が増えたらここにカードを足していく。
             const SliverPadding(
               padding: EdgeInsets.fromLTRB(20, 28, 20, 12),
               sliver: SliverToBoxAdapter(
-                child: _SectionLabel('捜査資料', icon: Icons.badge_outlined),
+                child: SectionLabel('捜査資料', icon: Icons.badge_outlined),
               ),
             ),
             SliverPadding(
@@ -255,7 +332,7 @@ class _HomePageState extends State<HomePage> {
             // ── 直近の事件 ──────────────────────────────────
             const SliverPadding(
               padding: EdgeInsets.fromLTRB(20, 28, 20, 12),
-              sliver: SliverToBoxAdapter(child: _SectionLabel('直近の事件')),
+              sliver: SliverToBoxAdapter(child: SectionLabel('直近の事件')),
             ),
 
             if (!_loading && preview.isEmpty)
@@ -275,18 +352,17 @@ class _HomePageState extends State<HomePage> {
                       child: CaseArchiveTile(
                         date: entry.key,
                         diary: diary,
-                        onTap: () =>
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute<void>(
-                                builder: (_) => DiaryDetailPage(
-                                  date: entry.key,
-                                  diary: diary,
-                                  uid: widget.uid,
-                                  firestore: _firestore,
-                                ),
-                              ),
-                            ).then((_) => _load()),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => DiaryDetailPage(
+                              date: entry.key,
+                              diary: diary,
+                              uid: widget.uid,
+                              firestore: _firestore,
+                            ),
+                          ),
+                        ).then((_) => _load()),
                       ),
                     );
                   }, childCount: preview.length),
@@ -383,7 +459,11 @@ class _TodayCaseCard extends StatelessWidget {
                             // ── 見出し行 ───────────────────────
                             Row(
                               children: [
-                                Icon(Icons.description, size: 16, color: c.gold),
+                                Icon(
+                                  Icons.description,
+                                  size: 16,
+                                  color: c.gold,
+                                ),
                                 const SizedBox(width: 6),
                                 // Spacer ではなく Expanded にする。
                                 // 端末の文字サイズを上げるとラベルとバッジが
@@ -402,7 +482,7 @@ class _TodayCaseCard extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                _StatusBadge(done: done),
+                                StatusBadge(done: done),
                               ],
                             ),
                             const SizedBox(height: 10),
@@ -500,36 +580,6 @@ class _TodayCardPlaceholder extends StatelessWidget {
   }
 }
 
-// 「未着手 / 記録済み」バッジ。
-// DiaryCard の CLOSED バッジと同じ枠線スタイルにして書類感を揃える。
-class _StatusBadge extends StatelessWidget {
-  final bool done;
-
-  const _StatusBadge({required this.done});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: done ? c.gold.withValues(alpha: 0.12) : Colors.transparent,
-        border: Border.all(color: c.gold),
-        borderRadius: BorderRadius.circular(2),
-      ),
-      child: Text(
-        done ? '記録済み' : '未着手',
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          color: c.gold,
-          letterSpacing: 1.2,
-        ),
-      ),
-    );
-  }
-}
-
 // 担当探偵の行。カード全体の InkWell の内側に入れ子にして、
 // ここだけ探偵タブへ飛ばす（内側の InkWell がタップを吸収する）。
 class _RoleRow extends StatelessWidget {
@@ -618,40 +668,6 @@ class _WeekHeatmap extends StatelessWidget {
           ),
         );
       }),
-    );
-  }
-}
-
-// セクション見出し。ゴールドの小見出し＋罫線で書類の章立てに見せる。
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  final IconData icon;
-
-  const _SectionLabel(this.text, {this.icon = Icons.folder_open});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: c.gold),
-        const SizedBox(width: 6),
-        Flexible(
-          child: Text(
-            text,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: c.gold,
-              letterSpacing: 1.0,
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(child: Divider(height: 1, color: c.cardBorder)),
-      ],
     );
   }
 }
@@ -790,6 +806,96 @@ class _SelfAnalysisTile extends StatelessWidget {
               ),
 
               // 右端の矢印アイコン
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Icon(Icons.chevron_right, color: c.gold, size: 20),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// 追跡中の事件が1件も無いとき・読み込み中に出すタイル。
+//
+// GoalCaseTile と共通化していないのは、あちらが「既にある事件1件」を描く部品で、
+// こちらは行き先の案内だから。相談室ハブの空状態は「＋ 新しい事件を立てる」が
+// 主役で見せ方が違うため、空状態は画面ごとに持つ。
+class _GoalNoticeTile extends StatelessWidget {
+  final String message;
+  final VoidCallback onTap;
+
+  const _GoalNoticeTile({required this.message, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Material(
+      color: c.cardBg,
+      shape: RoundedRectangleBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(4)),
+        side: BorderSide(color: c.cardBorder),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(4)),
+        ),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                width: 4,
+                decoration: BoxDecoration(
+                  color: c.gold,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(4),
+                    bottomLeft: Radius.circular(4),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.flag_outlined, size: 14, color: c.gold),
+                          const SizedBox(width: 6),
+                          Text(
+                            '追跡中の事件',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: c.gold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        message,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: c.textSecondary,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: Icon(Icons.chevron_right, color: c.gold, size: 20),

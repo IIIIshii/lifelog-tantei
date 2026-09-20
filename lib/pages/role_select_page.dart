@@ -7,8 +7,12 @@ import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 
 // 探偵キャラクター（ロール）を選ぶ専用画面。
-// ホーム画面から遷移し、選んだキャラを UserSettings.selectedRole として即時保存する。
+// 選んだキャラを UserSettings.selectedRole として即時保存する。
 // 保存先は SettingsPage と同じ Firestore users/{uid}/settings/preferences。
+//
+// 入口は2つ。ホームの「担当」行と、設定ページの「担当探偵」。
+// どちらも push なので AppBar には戻る矢印が自動で出る
+// （ボトムナビの1タブだった頃はルート直下にあり、矢印は出なかった）。
 class RoleSelectPage extends StatefulWidget {
   const RoleSelectPage({super.key});
 
@@ -70,12 +74,17 @@ class _RoleSelectPageState extends State<RoleSelectPage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('探偵キャラクター',
-                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
+            Text(
+              '探偵キャラクター',
+              style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
+            ),
             const SizedBox(height: 2),
-            Text('― 尋問する探偵を指名する ―',
-                style: DetectiveTextStyles.appBarSubtitle(
-                    color: c.appBarSubtitle)),
+            Text(
+              '― 尋問する探偵を指名する ―',
+              style: DetectiveTextStyles.appBarSubtitle(
+                color: c.appBarSubtitle,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -155,16 +164,15 @@ class _RoleCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // 左端のゴールドアクセントボーダー
-              Container(
-                width: 4,
-                color: c.gold,
-              ),
+              Container(width: 4, color: c.gold),
 
               // カード本文
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 16),
+                    horizontal: 16,
+                    vertical: 16,
+                  ),
                   child: Row(
                     children: [
                       Icon(Icons.person_search, color: c.gold, size: 28),
@@ -175,16 +183,21 @@ class _RoleCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(role.label,
-                                style: DetectiveTextStyles.cardTitle(
-                                    color: c.textPrimary)),
+                            Text(
+                              role.label,
+                              style: DetectiveTextStyles.cardTitle(
+                                color: c.textPrimary,
+                              ),
+                            ),
                             const SizedBox(height: 4),
-                            Text(role.description,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: c.textSecondary,
-                                  height: 1.4,
-                                )),
+                            Text(
+                              role.description,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: c.textSecondary,
+                                height: 1.4,
+                              ),
+                            ),
                           ],
                         ),
                       ),

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/goal.dart';
 import '../models/self_analysis.dart';
 import 'package:flutter/foundation.dart';
 import '../models/user_settings.dart';
@@ -603,5 +604,122 @@ class FirestoreService {
         .collection('self-analysis')
         .doc('profile')
         .set(selfAnalysis.toMap());
+  }
+
+  // 追跡中の目標を新しい順で返す。1件も無ければ空リスト。
+  //
+  // 保存先を goals/{goalId} の複数ドキュメントにしたのは、追う事件を
+  // kMaxTrackedGoals 件まで同時に持てるようにしたため。
+  //
+  // 旧スキーマ（アクティブな目標が常に1件で goals/current に置いていた頃）の
+  // ドキュメントが残っていれば、ここで goals/{goalId} へ移して current を消す。
+  // 一度きりの移行スクリプトを書かず読み取りのついでで済ませるのは、
+  // getUserSettings のカスタム質問の移行と同じ流儀
+  // （書き戻しが失敗しても読み込み自体は成功させ、次回の読み込みでまた試す）。
+  //
+  // 並べ替えをクエリの orderBy ではなく取得後に行うのは、createdAt を持たない
+  // 古いドキュメントが orderBy では結果から落ちてしまうため。
+  Future<List<Goal>> getGoals(String uid) async {
+    final snapshot = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('goals')
+        .get();
+
+    final divided = partitionGoalDocs(
+      snapshot.docs.map((doc) => MapEntry(doc.id, doc.data())),
+    );
+
+    final goals = [...divided.goals];
+    final legacy = divided.legacy;
+    if (legacy != null) {
+      // 移行が失敗しても、読み込んだ内容はそのまま画面に出す
+      goals.add(legacy);
+      try {
+        await _migrateLegacyGoal(uid, legacy);
+      } catch (e) {
+        debugPrint('旧形式の目標の移行に失敗しました: $e');
+      }
+    }
+
+    goals.sort(Goal.byNewest);
+    return goals;
+  }
+
+  // goals/current を goals/{goalId} へ移し替える。
+  // 書き込みと削除をまとめるのは、片方だけ通ると同じ目標が2件に見えるため。
+  Future<void> _migrateLegacyGoal(String uid, Goal goal) async {
+    final goals = _db.collection('users').doc(uid).collection('goals');
+    final batch = _db.batch();
+    batch.set(goals.doc(goal.id), goal.toMap());
+    batch.delete(goals.doc(kLegacyGoalDocId));
+    await batch.commit();
+  }
+
+  // 目標1件を保存する（既存の内容を丸ごと置き換える）。
+  // ドキュメントIDに Goal.id を使うので、見直しで同じ id のまま保存すれば
+  // 上書きになり、新しい id なら1件増える。
+  // id が空のまま呼ぶと Firestore は空のドキュメントIDで落ちる。
+  // 何が起きたのか分かる形で先に止める。
+  Future<void> saveGoal(String uid, Goal goal) async {
+    if (goal.id.isEmpty) {
+      throw ArgumentError.value(goal.id, 'goal.id', '目標のIDが空です');
+    }
+    await _db
+        .collection('users')
+        .doc(uid)
+        .collection('goals')
+        .doc(goal.id)
+        .set(goal.toMap());
+  }
+
+  // 目標の追跡を終える。goal-archive へ outcome を付けて退避し、goals から消す。
+  //
+  // 退避と削除を WriteBatch でまとめるのは、退避だけ成功して削除が落ちると
+  // 同じ事件が「追跡中」と「解決済み」の両方に出てしまうため。
+  // 未設定・id を持たないものは何もしない（空のドキュメントが増えるだけのため）。
+  Future<void> closeGoal(String uid, Goal goal, GoalOutcome outcome) async {
+    if (goal.isEmpty || goal.id.isEmpty) return;
+    final user = _db.collection('users').doc(uid);
+    final batch = _db.batch();
+    batch.set(user.collection('goal-archive').doc(goal.id), {
+      ...goal.toMap(),
+      'outcome': goalOutcomeTo(outcome),
+      'archivedAt': FieldValue.serverTimestamp(),
+    });
+    batch.delete(user.collection('goals').doc(goal.id));
+    await batch.commit();
+  }
+
+  // 解決・断念した目標を、退避が新しい順で返す。
+  //
+  // outcome が読めないものは null のまま返す。アクティブな目標が1件だった頃に
+  // 「新しい目標を立てたので押し出された」だけのものが混ざっており、
+  // 解決とも断念とも言えないため（goalOutcomeFrom の説明を参照）。
+  Future<List<ArchivedGoal>> getArchivedGoals(String uid) async {
+    final snapshot = await _db
+        .collection('users')
+        .doc(uid)
+        .collection('goal-archive')
+        .get();
+
+    final archived = <ArchivedGoal>[];
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final goal = Goal.fromMap(data);
+      if (goal.isEmpty) continue;
+      archived.add(
+        ArchivedGoal(
+          goal: goal.id.isEmpty ? goal.copyWith(id: doc.id) : goal,
+          outcome: goalOutcomeFrom(data['outcome'] as String?),
+          // Timestamp から DateTime への変換はここだけの仕事。
+          // モデル側を cloud_firestore に依存させないため。
+          archivedAt: (data['archivedAt'] as Timestamp?)?.toDate(),
+        ),
+      );
+    }
+
+    archived.sort(ArchivedGoal.byNewest);
+    return archived;
   }
 }
