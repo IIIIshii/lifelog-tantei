@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
+import '../core/question_schedule.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/detective_text_styles.dart';
@@ -222,6 +223,59 @@ class _SettingsPageState extends State<SettingsPage> {
     _save(_settings.copyWith(customQuestions: updated));
   }
 
+  // 指定idのカスタム質問の出題曜日を1つオン/オフして保存する
+  // 最後の1曜日はオフにできない（toggleWeekday が元のリストを返す）
+  void _toggleQuestionWeekday(String id, int weekday) {
+    final updated = _settings.customQuestions.map((q) {
+      if (q.id != id) return q;
+      return q.copyWith(weekdays: toggleWeekday(q.weekdays, weekday));
+    }).toList();
+    _save(_settings.copyWith(customQuestions: updated));
+  }
+
+  // 月〜日の曜日トグル。選択中は gold の塗り＋onAccent の文字
+  Widget _buildWeekdayToggles(CustomQuestion question, AppColors c) {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: List.generate(7, (i) {
+        final weekday = i + 1;
+        final selected = question.weekdays.contains(weekday);
+        return Semantics(
+          button: true,
+          selected: selected,
+          label: '${kWeekdayLabels[i]}曜日',
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => _toggleQuestionWeekday(question.id, weekday),
+            child: Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected ? c.gold : Colors.transparent,
+                border: Border.all(
+                  color: selected ? c.gold : c.cardBorder,
+                ),
+              ),
+              child: ExcludeSemantics(
+                child: Text(
+                  kWeekdayLabels[i],
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    color: selected ? c.onAccent : c.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -357,6 +411,24 @@ class _SettingsPageState extends State<SettingsPage> {
                               style: TextStyle(
                                 fontSize: 14,
                                 color: c.textPrimary,
+                              ),
+                            ),
+                            // 出題頻度（曜日）の要約とトグル
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '出題：${describeWeekdays(question.weekdays)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: c.textSecondary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  _buildWeekdayToggles(question, c),
+                                ],
                               ),
                             ),
                             // 削除ボタン

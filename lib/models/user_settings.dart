@@ -4,19 +4,42 @@ import 'package:uuid/uuid.dart';
 // id は追加時に発行される不変の識別子で、回答の紐付けキーとして使用する
 // （並べ替え・削除・将来の質問文編集を行っても id は変わらない）
 class CustomQuestion {
+  /// 全曜日（1=月〜7=日。DateTime.weekday と同じ番号）
+  static const List<int> allWeekdays = [1, 2, 3, 4, 5, 6, 7];
+
   final String id;
   final String text;
+  // 出題する曜日。weekdays フィールドが無い旧データは全曜日（毎日）として読む
+  final List<int> weekdays;
 
-  const CustomQuestion({required this.id, required this.text});
+  const CustomQuestion({
+    required this.id,
+    required this.text,
+    this.weekdays = allWeekdays,
+  });
 
   factory CustomQuestion.fromMap(Map<String, dynamic> map) {
+    final raw = (map['weekdays'] as List<dynamic>?)
+        ?.whereType<int>()
+        .where((d) => d >= 1 && d <= 7)
+        .toSet()
+        .toList()
+      ?..sort();
     return CustomQuestion(
       id: map['id'] as String,
       text: map['text'] as String? ?? '',
+      // 空リストは「永久に出題されない」状態なので、毎日に戻して救済する
+      weekdays: (raw == null || raw.isEmpty) ? allWeekdays : raw,
     );
   }
 
-  Map<String, dynamic> toMap() => {'id': id, 'text': text};
+  Map<String, dynamic> toMap() => {'id': id, 'text': text, 'weekdays': weekdays};
+
+  CustomQuestion copyWith({List<int>? weekdays}) => CustomQuestion(
+        id: id,
+        text: text,
+        weekdays: weekdays ?? this.weekdays,
+      );
 }
 
 // ユーザーの記録設定を保持するモデル
