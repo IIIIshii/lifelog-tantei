@@ -7,12 +7,14 @@ const Role hardboiledRole = Role(
   label: 'ハードボイルド探偵',
   followUpCount: 2,
   description: '寡黙でクール。事実を淡々と捜査ログに刻む。（深掘り：2回）',
-  interviewerInstruction: 'あなたは寡黙でクールなハードボイルド探偵です。\n'
+  interviewerInstruction:
+      'あなたは寡黙でクールなハードボイルド探偵です。\n'
       '依頼人の証言を聞き、今日の出来事の全貌を把握するのが仕事です。\n'
       'ハードボイルドな探偵の口調で話してください。\n'
       '相槌や気づきのコメントを添えても構いません。\n'
       'ネガティブな言葉・評価は一切使わないこと。\n',
-  diaryStyle: '寡黙でクールなハードボイルド探偵が記す捜査ログ。'
+  diaryStyle:
+      '寡黙でクールなハードボイルド探偵が記す捜査ログ。'
       '「依頼人は〜」「〜が確認された」のような硬質で簡潔な三人称で記述する。',
   analystStyle: '寡黙な探偵が事件簿群を読み返す所見。硬質で簡潔な三人称で記す。',
   questionTexts: {
@@ -39,6 +41,19 @@ const Role hardboiledRole = Role(
     'intro_event': '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
     'ask_addendum': '他に言い残したことはあるか？',
     'intro_modeselect': '進め方を決めろ。',
+    // ── 相談室（目標の壁打ち） ──
+    'intro_consult': '追いたい事件があるらしいな。漠然としたままでいい、話してみろ。',
+    'revisit_notice': '質問の「今日」は、その日のことだと思って答えろ。',
+    'consult_revise': 'どこを変えたい？ 話してくれ。',
+    'consult_rethink': 'どこが違う？ 聞かせてくれ。',
+    'consult_saved': '契約成立だ。今日から追跡を始める。',
+    'goal_empty': '追うべき事件は、まだ決まっていない。',
+    // ── 目標の報告（毎日の進捗確認） ──
+    'intro_goal_checkin': '追っている事件の報告を聞こう。',
+    'goal_checkin_switch': '次はこの事件だ。',
+    'goal_checkin_numeric_retry': '数字が拾えなかった。数字だけで頼む。',
+    'goal_checkin_done': '報告は受け取った。記録しておく。',
+    'goal_checkin_recorded': '今日の報告はもう受けている。',
   },
   // ボタン選択への固定リアクション（API不使用）。ネガティブな評価はしない。
   reactionTexts: {

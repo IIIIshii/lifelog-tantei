@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/streak.dart';
+import '../models/goal.dart';
 import '../models/self_analysis.dart';
 import 'package:flutter/foundation.dart';
 import '../models/user_settings.dart';
@@ -6,6 +8,160 @@ import '../models/user_settings.dart';
 // Firestoreへのデータ読み書きを担当するサービスクラス
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  // ──────────────────────────────────────────────────────────────
+  // コレクション参照
+  //
+  // パスをメソッドごとに直書きせず、ここに集約する。
+  // 日記（entries）と目標の日々の記録（goals/{goalId}/entries）は
+  // 同じ形のドキュメント（doc ID が 'YYYY-MM-DD'、answers / numericAnswers /
+  // skipped を持つ）なので、下の _xxxIn 系ヘルパへ参照を渡して操作を共用する。
+  // ──────────────────────────────────────────────────────────────
+  DocumentReference<Map<String, dynamic>> _user(String uid) =>
+      _db.collection('users').doc(uid);
+
+  CollectionReference<Map<String, dynamic>> _entries(String uid) =>
+      _user(uid).collection('entries');
+
+  CollectionReference<Map<String, dynamic>> _goals(String uid) =>
+      _user(uid).collection('goals');
+
+  // 目標1件の日々の記録。日記の entries と同じ構成で、diary を持たないだけ。
+  CollectionReference<Map<String, dynamic>> _goalEntries(
+    String uid,
+    String goalId,
+  ) => _goals(uid).doc(goalId).collection('entries');
+
+  // ──────────────────────────────────────────────────────────────
+  // エントリの共用操作（日記・目標のどちらにも使う）
+  // ──────────────────────────────────────────────────────────────
+
+  // 直近 days 日の日付キー範囲（今日を含む）。
+  // 日記と目標で同じ窓を使うため、計算をここに1本化している。
+  ({String from, String to}) _recentRange(int days) {
+    final now = DateTime.now();
+    final from = now.subtract(Duration(days: days - 1));
+    return (
+      from: from.toIso8601String().split('T')[0],
+      to: now.toIso8601String().split('T')[0],
+    );
+  }
+
+  // 質問キー→回答のマップを書き込む（既存データとマージする）。
+  // 3つとも空なら何も書かない（空のドキュメントを作らないため）。
+  //
+  // touchTimestamp は目標側だけ true にする。日記には saveDiary が時刻を残すが、
+  // 目標には日記本文が無く、ここで残さないとドキュメントに時刻が一切入らない。
+  Future<void> _saveAnswersIn(
+    CollectionReference<Map<String, dynamic>> entries,
+    String date,
+    Map<String, String> answers, {
+    Map<String, double>? numericAnswers,
+    List<String>? skippedKeys,
+    bool touchTimestamp = false,
+  }) async {
+    if (answers.isEmpty &&
+        (numericAnswers == null || numericAnswers.isEmpty) &&
+        (skippedKeys == null || skippedKeys.isEmpty)) {
+      return;
+    }
+    final data = <String, dynamic>{};
+    if (answers.isNotEmpty) data['answers'] = answers;
+    if (numericAnswers != null && numericAnswers.isNotEmpty) {
+      data['numericAnswers'] = numericAnswers;
+    }
+    if (skippedKeys != null && skippedKeys.isNotEmpty) {
+      data['skipped'] = skippedKeys;
+    }
+    if (touchTimestamp) data['timestamp'] = FieldValue.serverTimestamp();
+    await entries.doc(date).set(data, SetOptions(merge: true));
+  }
+
+  // 日付キーの範囲でエントリを取る。toKey を省くと fromKey 以降すべて。
+  //
+  // orderBy を使わないのは doc ID が 'YYYY-MM-DD' で範囲クエリだけで足りるため
+  // （複合インデックスも要らない）。呼び出し側は順序に依存しない作りになっている。
+  Future<List<MapEntry<String, Map<String, dynamic>>>> _entriesInRange(
+    CollectionReference<Map<String, dynamic>> entries,
+    String fromKey, {
+    String? toKey,
+  }) async {
+    Query<Map<String, dynamic>> query = entries.where(
+      FieldPath.documentId,
+      isGreaterThanOrEqualTo: fromKey,
+    );
+    if (toKey != null) {
+      query = query.where(FieldPath.documentId, isLessThanOrEqualTo: toKey);
+    }
+    final snap = await query.get();
+    return snap.docs.map((doc) => MapEntry(doc.id, doc.data())).toList();
+  }
+
+  Future<List<MapEntry<String, Map<String, dynamic>>>> _allEntriesIn(
+    CollectionReference<Map<String, dynamic>> entries,
+  ) async {
+    final snap = await entries.get();
+    return snap.docs.map((doc) => MapEntry(doc.id, doc.data())).toList();
+  }
+
+  // 1日分のエントリ。ドキュメントが無ければ null。
+  Future<Map<String, dynamic>?> _entryIn(
+    CollectionReference<Map<String, dynamic>> entries,
+    String date,
+  ) async {
+    final doc = await entries.doc(date).get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  Future<int> _messageCountIn(
+    CollectionReference<Map<String, dynamic>> entries,
+    String date,
+  ) async {
+    final snap = await entries
+        .doc(date)
+        .collection('conversation')
+        .count()
+        .get();
+    return snap.count ?? 0;
+  }
+
+  Future<void> _saveMessageIn(
+    CollectionReference<Map<String, dynamic>> entries,
+    String date,
+    String role,
+    String text,
+    int order,
+  ) async {
+    await entries.doc(date).collection('conversation').add({
+      'role': role,
+      'text': text,
+      'order': order,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+  }
+
+  // 会話を order 順に読み出す。
+  //
+  // role / text だけを返すのは、呼び出し側（画面の _messages と MessageBubble）が
+  // この形をそのまま使うため。timestamp は表示にも並べ替えにも使っていない
+  // （order はクライアント採番で、保存順を再現する唯一の手がかり）。
+  Future<List<Map<String, String>>> _messagesIn(
+    CollectionReference<Map<String, dynamic>> entries,
+    String date,
+  ) async {
+    final snap = await entries
+        .doc(date)
+        .collection('conversation')
+        .orderBy('order')
+        .get();
+    return snap.docs.map((doc) {
+      final data = doc.data();
+      return {
+        'role': data['role'] as String? ?? 'ai',
+        'text': data['text'] as String? ?? '',
+      };
+    }).toList();
+  }
 
   // ユーザーの設定をFirestoreから取得する（存在しなければデフォルト値を返す）
   Future<UserSettings> getUserSettings(String uid) async {
@@ -47,30 +203,13 @@ class FirestoreService {
 
   // 指定日の日記テキストをFirestoreから取得する（未生成の場合はnullを返す）
   Future<String?> getTodayDiary(String uid, String date) async {
-    final doc = await _db
-        .collection('users')
-        .doc(uid)
-        .collection('entries')
-        .doc(date)
-        .get();
-    if (doc.exists && doc.data()?['diary'] != null) {
-      return doc.data()!['diary'] as String;
-    }
-    return null;
+    final data = await _entryIn(_entries(uid), date);
+    return data?['diary'] as String?;
   }
 
   // 指定日の会話メッセージ数を返す（追記時のconversationOrderオフセット計算に使う）
-  Future<int> getMessageCount(String uid, String date) async {
-    final snap = await _db
-        .collection('users')
-        .doc(uid)
-        .collection('entries')
-        .doc(date)
-        .collection('conversation')
-        .count()
-        .get();
-    return snap.count ?? 0;
-  }
+  Future<int> getMessageCount(String uid, String date) =>
+      _messageCountIn(_entries(uid), date);
 
   // 会話の1メッセージをFirestoreに保存する（順序orderで並び替えできるようにする）
   Future<void> saveMessage(
@@ -79,20 +218,7 @@ class FirestoreService {
     String role,
     String text,
     int order,
-  ) async {
-    await _db
-        .collection('users')
-        .doc(uid)
-        .collection('entries')
-        .doc(date)
-        .collection('conversation')
-        .add({
-          'role': role,
-          'text': text,
-          'order': order,
-          'timestamp': FieldValue.serverTimestamp(),
-        });
-  }
+  ) => _saveMessageIn(_entries(uid), date, role, text, order);
 
   // 質問キー→回答テキストのマップをFirestoreに保存する（既存データとマージする）
   // numericAnswers が渡された場合は数値データも同時に保存する
@@ -103,50 +229,27 @@ class FirestoreService {
     Map<String, String> answers, {
     Map<String, double>? numericAnswers,
     List<String>? skippedKeys,
-  }) async {
-    if (answers.isEmpty &&
-        (numericAnswers == null || numericAnswers.isEmpty) &&
-        (skippedKeys == null || skippedKeys.isEmpty)) {
-      return;
-    }
-    final data = <String, dynamic>{};
-    if (answers.isNotEmpty) data['answers'] = answers;
-    if (numericAnswers != null && numericAnswers.isNotEmpty) {
-      data['numericAnswers'] = numericAnswers;
-    }
-    if (skippedKeys != null && skippedKeys.isNotEmpty) {
-      data['skipped'] = skippedKeys;
-    }
-    await _db
-        .collection('users')
-        .doc(uid)
-        .collection('entries')
-        .doc(date)
-        .set(data, SetOptions(merge: true));
-  }
+  }) => _saveAnswersIn(
+    _entries(uid),
+    date,
+    answers,
+    numericAnswers: numericAnswers,
+    skippedKeys: skippedKeys,
+  );
 
   // 直近 days 日分のエントリを日付文字列とデータのペアで返す
   Future<List<MapEntry<String, Map<String, dynamic>>>> getRecentEntries(
     String uid,
     int days,
-  ) async {
-    final now = DateTime.now();
-    final from = now.subtract(Duration(days: days - 1));
-    final fromStr = from.toIso8601String().split('T')[0];
-    final toStr = now.toIso8601String().split('T')[0];
-
-    final snap = await _db
-        .collection('users')
-        .doc(uid)
-        .collection('entries')
-        .where(FieldPath.documentId, isGreaterThanOrEqualTo: fromStr)
-        .where(FieldPath.documentId, isLessThanOrEqualTo: toStr)
-        .get();
-
-    return snap.docs.map((doc) => MapEntry(doc.id, doc.data())).toList();
+  ) {
+    final range = _recentRange(days);
+    return _entriesInRange(_entries(uid), range.from, toKey: range.to);
   }
 
   // 生成した日記テキストをFirestoreに保存する（既存データとマージする）
+  //
+  // 目標側に同じものを用意しないのは、目標の記録に日記本文が無いため
+  // （追跡の記録は answers と会話ログだけで足り、文面は生成も保存もしない）。
   Future<void> saveDiary(
     String uid,
     String date,
@@ -158,12 +261,7 @@ class FirestoreService {
       'timestamp': FieldValue.serverTimestamp(),
     };
     if (mode != null) data['diaryMode'] = mode;
-    await _db
-        .collection('users')
-        .doc(uid)
-        .collection('entries')
-        .doc(date)
-        .set(data, SetOptions(merge: true));
+    await _entries(uid).doc(date).set(data, SetOptions(merge: true));
   }
 
   // デモ用のモックデータを14日分Firestoreに書き込む。
@@ -512,23 +610,14 @@ class FirestoreService {
   Future<List<MapEntry<String, Map<String, dynamic>>>> getAllEntries(
     String uid,
   ) async {
-    final snap = await _db
-        .collection('users')
-        .doc(uid)
-        .collection('entries')
-        .get();
-    final entries = snap.docs
-        .map((doc) => MapEntry(doc.id, doc.data()))
-        .toList();
+    final entries = await _allEntriesIn(_entries(uid));
     entries.sort((a, b) => b.key.compareTo(a.key));
     return entries;
   }
 
   // 日記エントリ一覧を取得するクエリを返す
   // ソートはクライアント側でドキュメントID（YYYY-MM-DD）の降順で行う
-  Query<Map<String, dynamic>> entriesQuery(String uid) {
-    return _db.collection('users').doc(uid).collection('entries');
-  }
+  Query<Map<String, dynamic>> entriesQuery(String uid) => _entries(uid);
 
   // 最新のAI所見キャッシュを取得する（未生成なら null を返す）
   // ドキュメントは {text, generatedAt, periodDays} の形式で保存される
@@ -604,4 +693,246 @@ class FirestoreService {
         .doc('profile')
         .set(selfAnalysis.toMap());
   }
+
+  // 追跡中の目標を新しい順で返す。1件も無ければ空リスト。
+  //
+  // 保存先を goals/{goalId} の複数ドキュメントにしたのは、追う事件を
+  // kMaxTrackedGoals 件まで同時に持てるようにしたため。
+  //
+  // 追跡を終えたものは読まない（status で分かるが、ここでは捨てる）。
+  // goal-archive の移行も行わない ―― 解決済みを画面に出す相談室ハブだけが
+  // getAllGoals を呼び、そこで一度きりの引き上げを済ませる。
+  // ホーム・分析室・相談室の各画面が毎回 archive を読むのは無駄なため。
+  Future<List<Goal>> getGoals(String uid) async => (await _readGoals(uid)).active;
+
+  // 追跡中と追跡を終えたものを、1回の読み取りで分けて返す。
+  // 旧 goal-archive が残っていればここで goals へ引き上げる（下記 _migrateArchivedGoals）。
+  Future<({List<Goal> active, List<Goal> closed})> getAllGoals(
+    String uid,
+  ) async {
+    final divided = await _readGoals(uid);
+    final closed = [...divided.closed];
+    try {
+      closed.addAll(await _migrateArchivedGoals(uid));
+    } catch (e) {
+      // 読めなくても追跡中の目標は返す（解決済みの棚が空になるだけで済ませる）
+      debugPrint('解決済みの目標の読み込みに失敗しました: $e');
+    }
+    closed.sort(Goal.byClosedDesc);
+    return (active: divided.active, closed: closed);
+  }
+
+  // goals コレクションを読んで status で振り分ける。
+  //
+  // 旧スキーマ（アクティブな目標が常に1件で goals/current に置いていた頃）の
+  // ドキュメントが残っていれば、ここで goals/{goalId} へ移して current を消す。
+  // 一度きりの移行スクリプトを書かず読み取りのついでで済ませるのは、
+  // getUserSettings のカスタム質問の移行と同じ流儀
+  // （書き戻しが失敗しても読み込み自体は成功させ、次回の読み込みでまた試す）。
+  //
+  // 並べ替えをクエリの orderBy ではなく取得後に行うのは、createdAt を持たない
+  // 古いドキュメントが orderBy では結果から落ちてしまうため。
+  Future<({List<Goal> active, List<Goal> closed})> _readGoals(
+    String uid,
+  ) async {
+    final snapshot = await _goals(uid).get();
+
+    final divided = partitionGoalDocs(
+      snapshot.docs.map((doc) => MapEntry(doc.id, doc.data())),
+    );
+
+    final active = [...divided.active];
+    final legacy = divided.legacy;
+    if (legacy != null) {
+      // 移行が失敗しても、読み込んだ内容はそのまま画面に出す
+      active.add(legacy);
+      try {
+        await _migrateLegacyGoal(uid, legacy);
+      } catch (e) {
+        debugPrint('旧形式の目標の移行に失敗しました: $e');
+      }
+    }
+
+    active.sort(Goal.byNewest);
+    return (active: active, closed: divided.closed);
+  }
+
+  // goals/current を goals/{goalId} へ移し替える。
+  // 書き込みと削除をまとめるのは、片方だけ通ると同じ目標が2件に見えるため。
+  Future<void> _migrateLegacyGoal(String uid, Goal goal) async {
+    final goals = _goals(uid);
+    final batch = _db.batch();
+    batch.set(goals.doc(goal.id), goal.toMap());
+    batch.delete(goals.doc(kLegacyGoalDocId));
+    await batch.commit();
+  }
+
+  // 旧 goal-archive のドキュメントを goals/{goalId} へ status 付きで引き上げる。
+  //
+  // 追跡を終えた目標をドキュメントごと別コレクションへ移す方式をやめたのは、
+  // 目標が配下に日々の記録（entries サブコレクション）を持つようになったため。
+  // Firestore はドキュメントを移してもサブコレクションを運ばないので、
+  // 移す方式では解決した事件の記録が置き去りになる。
+  //
+  // 読めたものは書き戻しの成否にかかわらず返す（getUserSettings のカスタム質問移行と
+  // 同じ流儀）。書き込みと削除を WriteBatch でまとめるのは、片方だけ通ると
+  // 同じ事件が解決済みの棚に二重で出るため。
+  Future<List<Goal>> _migrateArchivedGoals(String uid) async {
+    final snapshot = await _user(uid).collection('goal-archive').get();
+    if (snapshot.docs.isEmpty) return const [];
+
+    final goals = <Goal>[];
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      // Timestamp から日付文字列への変換はここだけの仕事。
+      // モデル側を cloud_firestore に依存させないため。
+      final archivedAt = (data['archivedAt'] as Timestamp?)?.toDate();
+      final goal = goalFromArchiveDoc(
+        doc.id,
+        data,
+        closedAt: archivedAt == null ? '' : dateKey(archivedAt),
+      );
+      if (goal.isEmpty) continue;
+      goals.add(goal);
+    }
+    if (goals.isEmpty) return goals;
+
+    try {
+      final batch = _db.batch();
+      for (final goal in goals) {
+        batch.set(_goals(uid).doc(goal.id), goal.toMap());
+      }
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('解決済みの目標の移行書き戻しに失敗しました: $e');
+    }
+    return goals;
+  }
+
+  // 目標1件を保存する（既存の内容を丸ごと置き換える）。
+  // ドキュメントIDに Goal.id を使うので、見直しで同じ id のまま保存すれば
+  // 上書きになり、新しい id なら1件増える。
+  // id が空のまま呼ぶと Firestore は空のドキュメントIDで落ちる。
+  // 何が起きたのか分かる形で先に止める。
+  //
+  // set() の全置換でも配下の entries サブコレクションは消えない
+  // （Firestore はドキュメントのフィールドだけを置き換える）ので、
+  // 見立てを見直しても日々の記録は残る。
+  Future<void> saveGoal(String uid, Goal goal) async {
+    if (goal.id.isEmpty) {
+      throw ArgumentError.value(goal.id, 'goal.id', '目標のIDが空です');
+    }
+    await _goals(uid).doc(goal.id).set(goal.toMap());
+  }
+
+  // 目標の追跡を終える。ドキュメントは移さず status と closedAt を書き換えるだけ。
+  //
+  // 配下の記録（entries サブコレクション）をそのまま残すための方式。
+  // closedAt は 'YYYY-MM-DD'（呼び出し側が dateKey で渡す）。
+  // 未設定・id を持たないものは何もしない（空のドキュメントが増えるだけのため）。
+  Future<void> closeGoal(
+    String uid,
+    Goal goal,
+    GoalStatus status, {
+    required String closedAt,
+  }) async {
+    if (goal.isEmpty || goal.id.isEmpty) return;
+    await _goals(uid).doc(goal.id).set({
+      'status': goalStatusTo(status),
+      'closedAt': closedAt,
+    }, SetOptions(merge: true));
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // 目標の日々の記録（goals/{goalId}/entries/{YYYY-MM-DD}）
+  //
+  // 日記のエントリと同じ形にしているので、lib/core/goal_progress.dart の
+  // 達成率・最新値の計算をそのまま通せる（回答キーも 'goal_<actionId>' のまま）。
+  // 日記本文に相当するものは持たない。
+  // ──────────────────────────────────────────────────────────────
+
+  Future<void> saveGoalAnswers(
+    String uid,
+    String goalId,
+    String date,
+    Map<String, String> answers, {
+    Map<String, double>? numericAnswers,
+    List<String>? skippedKeys,
+  }) => _saveAnswersIn(
+    _goalEntries(uid, goalId),
+    date,
+    answers,
+    numericAnswers: numericAnswers,
+    skippedKeys: skippedKeys,
+    // 日記と違ってこのコレクションには saveDiary が来ないため、
+    // ここで時刻を残さないとドキュメントに一切入らない
+    touchTimestamp: true,
+  );
+
+  // 直近 days 日分（分析室の窓に合わせるとき用）
+  Future<List<MapEntry<String, Map<String, dynamic>>>> getRecentGoalEntries(
+    String uid,
+    String goalId,
+    int days,
+  ) {
+    final range = _recentRange(days);
+    return _entriesInRange(
+      _goalEntries(uid, goalId),
+      range.from,
+      toKey: range.to,
+    );
+  }
+
+  // fromKey 以降すべて（記録一覧が着手日から辿るとき用）。
+  // 上限を付けないのは、未来日付のエントリが作られないため。
+  Future<List<MapEntry<String, Map<String, dynamic>>>> getGoalEntriesSince(
+    String uid,
+    String goalId,
+    String fromKey,
+  ) => _entriesInRange(_goalEntries(uid, goalId), fromKey);
+
+  // 指定日のエントリを目標ごとに引く（記録が無い目標はキーごと入らない）。
+  //
+  // 追跡中は最大 kMaxTrackedGoals 件なので、並行の単発読みで足りる。
+  // collectionGroup('entries') を使わないのは、日記の entries と同名でぶつかり
+  // 日記エントリまで拾ってしまうため。
+  Future<Map<String, Map<String, dynamic>>> getGoalEntriesOn(
+    String uid,
+    Iterable<String> goalIds,
+    String date,
+  ) async {
+    final ids = goalIds.toList(growable: false);
+    if (ids.isEmpty) return const {};
+    final entries = await Future.wait(
+      ids.map((id) => _entryIn(_goalEntries(uid, id), date)),
+    );
+    final result = <String, Map<String, dynamic>>{};
+    for (var i = 0; i < ids.length; i++) {
+      final data = entries[i];
+      if (data != null) result[ids[i]] = data;
+    }
+    return result;
+  }
+
+  Future<int> getGoalMessageCount(String uid, String goalId, String date) =>
+      _messageCountIn(_goalEntries(uid, goalId), date);
+
+  Future<void> saveGoalMessage(
+    String uid,
+    String goalId,
+    String date,
+    String role,
+    String text,
+    int order,
+  ) => _saveMessageIn(_goalEntries(uid, goalId), date, role, text, order);
+
+  // その日の会話を order 順で返す。記録一覧から1日分を読み返すために使う。
+  Future<List<Map<String, String>>> getGoalConversation(
+    String uid,
+    String goalId,
+    String date,
+  ) => _messagesIn(_goalEntries(uid, goalId), date);
 }

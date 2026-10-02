@@ -47,9 +47,16 @@ class _Question {
   const _Question(this.text, {this.choices, this.key});
 }
 
-// 今日の日記を作成するページ。AIとの対話を通じて日記を生成する
+// 日記を作成するページ。AIとの対話を通じて日記を生成する。
+//
+// date を渡すとその日の事件簿を対象にする（事件簿の詳細から「聞き直す」で来る）。
+// 既に日記がある日なら、今日と同じ「追記する / いちから作り直す / 日記を確認する」の
+// 分岐に合流するので、作り直しの流れそのものは今日の分と共通になる。
 class DiaryPage extends StatefulWidget {
-  const DiaryPage({super.key});
+  /// 対象の日付（YYYY-MM-DD）。null なら今日の新規作成。
+  final String? date;
+
+  const DiaryPage({super.key, this.date});
 
   @override
   State<DiaryPage> createState() => _DiaryPageState();
@@ -72,6 +79,8 @@ class _DiaryPageState extends State<DiaryPage> {
   final Map<String, String> _answers = {}; // 質問キー → 回答テキストのマップ
   final Map<String, double> _numericAnswers = {}; // 質問キー → 数値回答のマップ
   final Set<String> _skippedKeys = {}; // スキップした質問キー（Firestoreへ保存）
+  // カスタム質問の回答キー → 質問文。日記生成へ回答を渡すときに使う（_buildQueuesで構築）
+  final Map<String, String> _customQuestionLabels = {};
   // スキップ済みイベント質問の_messagesインデックス（Gemini除外用）。
   // イベント質問とその「（スキップ）」吹き出しの両方を登録する。
   final Set<int> _skippedMsgIndices = {};
@@ -108,6 +117,39 @@ class _DiaryPageState extends State<DiaryPage> {
 
   int _totalQuestions = 0;
   int _answeredQuestionCount = 0;
+
+  // 過去の事件簿を取り直しに来たか。
+  // 今日の分を詳細画面から開いた場合はここを通っても「今日」のままなので、
+  // 日付が渡されているかではなく、今日と違うかで判定する
+  // （そうしないと今日の捜査にまで「対象は9月20日」と断りが出る）。
+  bool get _isRevisit {
+    final date = widget.date;
+    return date != null &&
+        date != DateTime.now().toIso8601String().split('T')[0];
+  }
+
+  // 'YYYY-MM-DD' → '9月18日'。取り直す対象の日を会話と見出しで示す。
+  String _monthDayLabel(String key) {
+    final parts = key.split('-');
+    if (parts.length != 3) return key;
+    final month = int.tryParse(parts[1]);
+    final day = int.tryParse(parts[2]);
+    if (month == null || day == null) return key;
+    return '$month月$day日';
+  }
+
+  // 再捜査のときだけ、質問を始める前に対象日を断っておく。
+  //
+  // ロール定義の質問文は '今日、何を口にした？' のように「今日」を含むものが多い。
+  // 4ロールぶんを日付中立に書き換えると通常フローの文面まで変わるので、
+  // 取り違えだけをここで防ぐ。
+  void _postRevisitNotice() {
+    if (!_isRevisit) return;
+    _postAiMessage(
+      '対象は${_monthDayLabel(_today!)}。'
+      '${_currentRole.text('revisit_notice', '質問の「今日」は、その日のことだと思って答えてくれ。')}',
+    );
+  }
 
   // メインの出来事質問リスト（key→ロール定義の文面、無ければここの text をデフォルトに使う）
   static const List<_Question> _eventQuestions = [
@@ -149,12 +191,14 @@ class _DiaryPageState extends State<DiaryPage> {
     setState(() => _isLoading = true);
     try {
       _uid = FirebaseAuth.instance.currentUser!.uid;
-      _today = DateTime.now().toIso8601String().split('T')[0];
+      _today = widget.date ?? DateTime.now().toIso8601String().split('T')[0];
 
       final existingDiary = await _firestore.getTodayDiary(_uid!, _today!);
       if (existingDiary != null) {
         _conversationOrder = await _firestore.getMessageCount(_uid!, _today!);
-        const message = '今日の事件簿はすでに存在する。どうするつもりだ？';
+        final message = _isRevisit
+            ? '${_monthDayLabel(_today!)}の事件簿はすでに存在する。どうするつもりだ？'
+            : '今日の事件簿はすでに存在する。どうするつもりだ？';
         await _firestore.saveMessage(
           _uid!,
           _today!,
@@ -173,6 +217,7 @@ class _DiaryPageState extends State<DiaryPage> {
       final settings = await _initGemini();
       // 質問文・ナレーションはロール定義から同期的に引く（Gemini生成の待ちは無い）
       _buildQueues(settings);
+      _postRevisitNotice();
       await _askNext();
     } catch (e) {
       _showError('初期化エラー: $e');
@@ -231,6 +276,7 @@ class _DiaryPageState extends State<DiaryPage> {
     try {
       final settings = await _initGemini();
       _buildQueues(settings);
+      _postRevisitNotice();
       await _askNext();
     } catch (e) {
       _showError('初期化エラー: $e');
@@ -313,10 +359,12 @@ class _DiaryPageState extends State<DiaryPage> {
         ),
       );
     }
+    // 質問文は回答キーと対にして控えておく。キューは尋問で消費されてしまうので、
+    // 日記生成へ「何を尋ねた答えか」を渡すにはここで別に持つ必要がある。
+    _customQuestionLabels.clear(); // 「いちから作り直す」で再実行されるため積み直す
     for (final question in settings.customQuestions) {
-      _customQueue.add(
-        _Question(question.text, key: 'custom_${question.id}'),
-      );
+      _customQuestionLabels[question.answerKey] = question.text;
+      _customQueue.add(_Question(question.text, key: question.answerKey));
     }
 
     // ── 思い出しアシストキュー ──
@@ -413,7 +461,7 @@ class _DiaryPageState extends State<DiaryPage> {
         final hasCustomAnswers = _answers.keys.any(
           (k) =>
               ['sleep', 'food', 'exercise', 'study'].contains(k) ||
-              k.startsWith('custom_'),
+              k.startsWith(kCustomAnswerPrefix),
         );
         if (hasCustomAnswers) {
           _postAiMessage(
@@ -943,9 +991,20 @@ class _DiaryPageState extends State<DiaryPage> {
       for (final k in customKeys) {
         if (_answers.containsKey(k)) lines.add('$k: ${_answers[k]}');
       }
-      _answers.keys.where((k) => k.startsWith('custom_')).forEach((k) {
-        lines.add('カスタム: ${_answers[k]}');
-      });
+      // カスタム質問の回答は、何を尋ねた答えかが分かる形で渡す。
+      // キーだけ渡すと AI から中身が見えない（以前はここで質問文を捨てていて、
+      // どのカスタム質問の回答も 'カスタム: はい' としか渡っていなかった）。
+      //
+      // ラベルを引けないキーは渡さない。設定から消された質問の回答がエントリに
+      // 残っている場合が該当し、何への答えか分からないまま日記の材料にできないため。
+      void addLabeled(Map<String, String> labels) {
+        labels.forEach((key, label) {
+          final answer = _answers[key];
+          if (answer != null) lines.add('$label: $answer');
+        });
+      }
+
+      addLabeled(_customQuestionLabels);
     }
     if (_includeRecallInDiary) {
       for (final k in ['morning', 'afternoon', 'evening']) {
@@ -1152,7 +1211,8 @@ class _DiaryPageState extends State<DiaryPage> {
     }
     // タイプ中は回答手段を出さない（質問が出きる前に答えられてしまわないように）
     final isTyping = typingIndex != null;
-    final showChoices = !_diaryGenerated &&
+    final showChoices =
+        !_diaryGenerated &&
         !_isLoading &&
         !isTyping &&
         lastIsAI &&
@@ -1190,12 +1250,14 @@ class _DiaryPageState extends State<DiaryPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '新規捜査',
+              _isRevisit ? '再捜査' : '新規捜査',
               style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
             ),
             const SizedBox(height: 2),
             Text(
-              '― 証拠を集める ―',
+              _isRevisit
+                  ? '― ${_monthDayLabel(widget.date!)}の証拠を取り直す ―'
+                  : '― 証拠を集める ―',
               style: DetectiveTextStyles.appBarSubtitle(
                 color: c.appBarSubtitle,
               ),

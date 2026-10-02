@@ -34,11 +34,13 @@ class DiaryPrompts {
   // 直近期間の事件簿群を解析するプロンプトを組み立てる。
   // entries は (YYYY-MM-DD, データMap) のリストで、日付昇順でも降順でも可。
   // 内部で日付昇順に整形し直し、日記本文と主要回答だけを抜き出して渡す。
+  // answerLabels: 固定項目以外の回答キー → 人が読めるラベル（_formatAnswers 参照）。
   static String buildAnalysisPrompt(
-    List<MapEntry<String, Map<String, dynamic>>> entries,
-  ) {
+    List<MapEntry<String, Map<String, dynamic>>> entries, {
+    Map<String, String> answerLabels = const {},
+  }) {
     final sorted = [...entries]..sort((a, b) => a.key.compareTo(b.key));
-    final body = _formatEntries(sorted); // ← 切り出したメソッドを呼ぶ
+    final body = _formatEntries(sorted, labels: answerLabels);
 
     return '以下は依頼人の直近${sorted.length}日分の事件簿である。\n\n'
         '$body\n\n'
@@ -74,8 +76,9 @@ class DiaryPrompts {
 
   // 複数エントリを「【日付】日記: ... / 回答: ...」形式の文字列に整形する
   static String _formatEntries(
-    List<MapEntry<String, Map<String, dynamic>>> entries,
-  ) {
+    List<MapEntry<String, Map<String, dynamic>>> entries, {
+    Map<String, String> labels = const {},
+  }) {
     return entries
         .map((e) {
           final data = e.value;
@@ -85,17 +88,28 @@ class DiaryPrompts {
 
           final parts = <String>['【${e.key}】'];
           if (diary != null && diary.isNotEmpty) parts.add('日記: $diary');
-          final answerLine = _formatAnswers(answers, numeric);
+          final answerLine = _formatAnswers(answers, numeric, labels: labels);
           if (answerLine.isNotEmpty) parts.add('回答: $answerLine');
           return parts.join('\n');
         })
         .join('\n\n');
   }
 
+  // labels: 固定項目以外の回答キー → 人が読めるラベル。
+  // カスタム質問なら質問文、目標の行動項目なら目標名付きの項目名が入る。
+  //
+  // エントリ側に保存されているのは custom_<uuid> / goal_<uuid> という
+  // 参照キーだけで、それが何を尋ねた答えなのかはユーザー設定・目標の側にしかない。
+  // 対応表を呼び出し側から渡させるのはこのため。
+  //
+  // 逆に、ここに載っていないキーは渡さない。設定から消された質問の回答や
+  // 安定ID導入前のキー（custom_0 等）が該当し、何への答えか分からない値を
+  // 所見の材料にすると、AI が文脈を勝手に補う方向に働くため。
   static String _formatAnswers(
     Map<String, dynamic>? answers,
-    Map<String, dynamic>? numeric,
-  ) {
+    Map<String, dynamic>? numeric, {
+    Map<String, String> labels = const {},
+  }) {
     if (answers == null && numeric == null) return '';
     final pairs = <String>[];
     final sleep = numeric?['sleep'];
@@ -111,14 +125,17 @@ class DiaryPrompts {
     add('event_what', '出来事');
     add('event_how', '感情');
     add('event_where', '場所');
+    labels.forEach(add);
     return pairs.join(' / ');
   }
 
   // 今日1日のエントリと直近14日分を渡して、今日へのコメントプロンプトを組み立てる。
+  // answerLabels: 固定項目以外の回答キー → 人が読めるラベル（_formatAnswers 参照）。
   static String buildDailyCommentPrompt(
     Map<String, dynamic> todayEntry,
-    List<MapEntry<String, Map<String, dynamic>>> recentEntries,
-  ) {
+    List<MapEntry<String, Map<String, dynamic>>> recentEntries, {
+    Map<String, String> answerLabels = const {},
+  }) {
     // 今日のデータを整形
     final diary = (todayEntry['diary'] as String?)?.trim();
     final answers = todayEntry['answers'] as Map<String, dynamic>?;
@@ -126,13 +143,13 @@ class DiaryPrompts {
 
     final todayParts = <String>[];
     if (diary != null && diary.isNotEmpty) todayParts.add('日記: $diary');
-    final answerLine = _formatAnswers(answers, numeric);
+    final answerLine = _formatAnswers(answers, numeric, labels: answerLabels);
     if (answerLine.isNotEmpty) todayParts.add('回答: $answerLine');
     final todayBody = todayParts.join('\n');
 
     // 直近14日分を整形
     final sorted = [...recentEntries]..sort((a, b) => a.key.compareTo(b.key));
-    final recentBody = _formatEntries(sorted);
+    final recentBody = _formatEntries(sorted, labels: answerLabels);
 
     return '以下は依頼人の今日の記録である。\n\n'
         '$todayBody\n\n'

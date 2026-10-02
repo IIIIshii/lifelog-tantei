@@ -3,9 +3,18 @@ import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../services/firestore_service.dart';
 import 'diary_edit_page.dart';
+import 'diary_page.dart';
 
-// 特定の日の日記を事件報告書として全文表示する詳細ページ
-class DiaryDetailPage extends StatelessWidget {
+// 特定の日の日記を事件報告書として全文表示する詳細ページ。
+//
+// 直し方は2通りある。本文を手で書き換える DiaryEditPage と、探偵の質問に
+// 答え直して生成しなおす DiaryPage。どちらも同じ重みで並べているのは、
+// 一字だけ直したいときと、記録そのものを取り直したいときで要るものが違うため。
+//
+// StatefulWidget なのは、どちらかで直して戻ってきたときに本文を取り直すため。
+// 一覧（DiaryListPage）は Firestore の snapshot を直接見ているので自動で追いつくが、
+// この画面は開いた時点の本文を受け取っているだけで、放っておくと古い文面が残る。
+class DiaryDetailPage extends StatefulWidget {
   final String date; // 表示する日付（YYYY-MM-DD）
   final String diary; // 表示する日記テキスト
   final String uid; // 編集保存に必要なユーザーID
@@ -19,6 +28,13 @@ class DiaryDetailPage extends StatelessWidget {
     required this.firestore,
   });
 
+  @override
+  State<DiaryDetailPage> createState() => _DiaryDetailPageState();
+}
+
+class _DiaryDetailPageState extends State<DiaryDetailPage> {
+  late String _diary = widget.diary;
+
   // YYYY-MM-DD → YYYY年MM月DD日 に整形する（diary_list_pageと同じ形式）
   String _formatDate(String raw) {
     final parts = raw.split('-');
@@ -26,10 +42,50 @@ class DiaryDetailPage extends StatelessWidget {
     return '${parts[0]}年${parts[1]}月${parts[2]}日';
   }
 
+  // 直しから戻ってきたときに本文を取り直す。
+  // 読めなかった場合は画面に出ている文面を保つ（空にして驚かせない）。
+  Future<void> _reload() async {
+    try {
+      final latest = await widget.firestore.getTodayDiary(
+        widget.uid,
+        widget.date,
+      );
+      if (!mounted || latest == null) return;
+      setState(() => _diary = latest);
+    } catch (_) {
+      // 表示は保ったままにする
+    }
+  }
+
+  // 本文を手で書き換える
+  void _openEdit() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => DiaryEditPage(
+          uid: widget.uid,
+          today: widget.date,
+          firestore: widget.firestore,
+          initialDiary: _diary,
+        ),
+      ),
+    ).then((_) => _reload());
+  }
+
+  // 探偵に聞き直して報告書を作り直す。
+  // 既に日記のある日なので、DiaryPage 側では今日の分と同じ
+  // 「追記する / いちから作り直す / 日記を確認する」の分岐に合流する。
+  void _openRevisit() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => DiaryPage(date: widget.date)),
+    ).then((_) => _reload());
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final displayDiary = diary.trim().isEmpty ? '（本文なし）' : diary;
+    final displayDiary = _diary.trim().isEmpty ? '（本文なし）' : _diary;
     return Scaffold(
       backgroundColor: c.background,
 
@@ -44,7 +100,7 @@ class DiaryDetailPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              _formatDate(date),
+              _formatDate(widget.date),
               style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
             ),
             const SizedBox(height: 2),
@@ -138,38 +194,55 @@ class DiaryDetailPage extends StatelessWidget {
               ),
             ),
           ),
+
+          // ── 直し方の2択 ──────────────────────────────────────
+          // どちらが主とも決めていないので、同じ見た目で横に並べる。
+          // 一字だけ直したいときと、記録そのものを取り直したいときで
+          // 要るものが違い、どちらが多いとも言えないため。
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => DiaryEditPage(
-                      uid: uid,
-                      today: date,
-                      firestore: firestore,
-                      initialDiary: diary,
-                    ),
-                  ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _FixButton(label: '手で編集', onPressed: _openEdit),
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: c.gold,
-                  foregroundColor: c.onAccent,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _FixButton(label: '探偵に聞き直す', onPressed: _openRevisit),
                 ),
-                child: const Text(
-                  '編集する',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// 直し方のボタン1つ。見分けるのはラベルだけで、見た目に重みは付けない。
+class _FixButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onPressed;
+
+  const _FixButton({required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return ElevatedButton(
+      onPressed: onPressed,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: c.gold,
+        foregroundColor: c.onAccent,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      ),
+      // 端末幅が狭くてもボタンが縦に伸びないよう1行に収める
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
       ),
     );
   }
