@@ -20,7 +20,14 @@ import 'role_select_page.dart';
 // ユーザーが捜査（記録）方針を設定する画面
 // 記録項目のON/OFFとカスタム質問の管理を行う
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  /// MainShell が値を進めるたびに設定を読み直すシグナル。
+  /// タブは IndexedStack で保持され破棄されないため、相談室で独自質問が
+  /// 増えてもこの合図が無いと画面に現れない。さらに saveUserSettings は
+  /// .set() の全置換なので、古い設定を握ったままトグルを触ると
+  /// その質問を消してしまう。
+  final ValueListenable<int> refreshSignal;
+
+  const SettingsPage({super.key, required this.refreshSignal});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -41,11 +48,13 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    widget.refreshSignal.addListener(_loadSettings);
     _loadSettings();
   }
 
   @override
   void dispose() {
+    widget.refreshSignal.removeListener(_loadSettings);
     _customQuestionController.dispose();
     super.dispose();
   }
@@ -146,7 +155,11 @@ class _SettingsPageState extends State<SettingsPage> {
       _settings.copyWith(
         customQuestions: [
           ..._settings.customQuestions,
-          CustomQuestion(id: const Uuid().v4(), text: text),
+          CustomQuestion(
+            id: const Uuid().v4(),
+            text: text,
+            source: CustomQuestionSource.self,
+          ),
         ],
       ),
     );
@@ -404,6 +417,20 @@ class _SettingsPageState extends State<SettingsPage> {
                                 color: c.textPrimary,
                               ),
                             ),
+                            // 相談室で加えた質問だけ出所を添える。
+                            // 自分で書いたものに「自分で書いた」と出すのは
+                            // 情報量が無く、出所が分からない古い質問には
+                            // 嘘を書かないよう何も出さない。
+                            subtitle:
+                                question.source == CustomQuestionSource.consult
+                                ? Text(
+                                    '相談室で加えた質問',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: c.textSecondary,
+                                    ),
+                                  )
+                                : null,
                             // 削除ボタン
                             trailing: IconButton(
                               icon: Icon(

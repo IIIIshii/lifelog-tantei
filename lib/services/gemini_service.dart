@@ -303,10 +303,16 @@ class GeminiService {
 
   // 直近のエントリ群（日付→データ）から所見テキストをGeminiに生成させる。
   // 呼び出し側は FirestoreService.getRecentEntries の戻り値をそのまま渡せる。
+  // answerLabels: カスタム質問・目標の行動項目のキーを質問文へ戻す対応表。
+  // エントリには参照キーしか入っていないため、渡さないとこれらは所見の材料から落ちる。
   Future<String> generateAnalysis(
-    List<MapEntry<String, Map<String, dynamic>>> entries,
-  ) async {
-    final prompt = DiaryPrompts.buildAnalysisPrompt(entries);
+    List<MapEntry<String, Map<String, dynamic>>> entries, {
+    Map<String, String> answerLabels = const {},
+  }) async {
+    final prompt = DiaryPrompts.buildAnalysisPrompt(
+      entries,
+      answerLabels: answerLabels,
+    );
     final response = await _analysisModel.generateContent([
       Content.text(prompt),
     ]);
@@ -321,13 +327,16 @@ class GeminiService {
   }
 
   // 今日のエントリと直近14日分からコメントテキストをGeminiに生成させる。
+  // answerLabels は generateAnalysis と同じ対応表。
   Future<String> generateDailyComment(
     Map<String, dynamic> todayEntry,
-    List<MapEntry<String, Map<String, dynamic>>> recentEntries,
-  ) async {
+    List<MapEntry<String, Map<String, dynamic>>> recentEntries, {
+    Map<String, String> answerLabels = const {},
+  }) async {
     final prompt = DiaryPrompts.buildDailyCommentPrompt(
       todayEntry,
       recentEntries,
+      answerLabels: answerLabels,
     );
     final response = await _analysisModel.generateContent([
       Content.text(prompt),

@@ -43,10 +43,17 @@ const Role hardboiledRole = Role(
     'intro_modeselect': '進め方を決めろ。',
     // ── 相談室（目標の壁打ち） ──
     'intro_consult': '追いたい事件があるらしいな。漠然としたままでいい、話してみろ。',
+    'revisit_notice': '質問の「今日」は、その日のことだと思って答えろ。',
     'consult_revise': 'どこを変えたい？ 話してくれ。',
     'consult_rethink': 'どこが違う？ 聞かせてくれ。',
     'consult_saved': '契約成立だ。今日から追跡を始める。',
     'goal_empty': '追うべき事件は、まだ決まっていない。',
+    // ── 目標の報告（毎日の進捗確認） ──
+    'intro_goal_checkin': '追っている事件の報告を聞こう。',
+    'goal_checkin_switch': '次はこの事件だ。',
+    'goal_checkin_numeric_retry': '数字が拾えなかった。数字だけで頼む。',
+    'goal_checkin_done': '報告は受け取った。記録しておく。',
+    'goal_checkin_recorded': '今日の報告はもう受けている。',
   },
   // ボタン選択への固定リアクション（API不使用）。ネガティブな評価はしない。
   reactionTexts: {

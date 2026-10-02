@@ -16,11 +16,21 @@ class SectionLabel extends StatelessWidget {
   final String text;
   final IconData icon;
 
-  const SectionLabel(this.text, {super.key, this.icon = Icons.folder_open});
+  /// 罫線の右端に添える小さな補足（「記録 12 / 45日」など）。
+  /// null なら罫線が端まで伸びる（従来の見た目）。
+  final String? trailing;
+
+  const SectionLabel(
+    this.text, {
+    super.key,
+    this.icon = Icons.folder_open,
+    this.trailing,
+  });
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    final note = trailing;
     return Row(
       children: [
         Icon(icon, size: 14, color: c.gold),
@@ -40,6 +50,10 @@ class SectionLabel extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Expanded(child: Divider(height: 1, color: c.cardBorder)),
+        if (note != null) ...[
+          const SizedBox(width: 10),
+          Text(note, style: TextStyle(fontSize: 11, color: c.textSecondary)),
+        ],
       ],
     );
   }

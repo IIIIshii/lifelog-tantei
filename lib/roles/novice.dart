@@ -42,10 +42,17 @@ const Role noviceRole = Role(
     'intro_modeselect': 'えっと、どちらの進め方がよろしいでしょうか…？',
     // ── 相談室（目標の壁打ち） ──
     'intro_consult': 'あの、これから何を目指していきたいか、聞かせていただけますか…！',
+    'revisit_notice': '質問で「今日」と言ったら、その日のことだと思ってください…！',
     'consult_revise': 'どこを直しましょうか…？ 教えてください…！',
     'consult_rethink': 'あ、すみません…どのあたりが違いましたか…？',
     'consult_saved': 'ありがとうございます…！ 今日から一緒に追いかけますね。',
     'goal_empty': '目指すものは、まだお聞きできていません。',
+    // ── 目標の報告（毎日の進捗確認） ──
+    'intro_goal_checkin': '追いかけている件について、少しお聞きしますね…！',
+    'goal_checkin_switch': '次は、こちらの件です…！',
+    'goal_checkin_numeric_retry': 'すみません、数字が読み取れませんでした…数字だけで教えてください…！',
+    'goal_checkin_done': 'ありがとうございます…！ 記録しておきますね。',
+    'goal_checkin_recorded': '今日の分は、もうお聞きできています…！',
   },
   // ボタン選択への固定リアクション（API不使用）。ネガティブな評価はしない。
   reactionTexts: {

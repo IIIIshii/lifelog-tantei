@@ -11,6 +11,7 @@ import '../services/firestore_service.dart';
 import '../widgets/goal_case_tile.dart';
 import '../widgets/section_label.dart';
 import 'consult_page.dart';
+import 'goal_log_page.dart';
 
 // ──────────────────────────────────────────────────────────────
 // 相談室タブ。追跡中の事件の一覧と、新しい事件を立てる入口。
@@ -49,7 +50,7 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
   bool _failed = false;
   Role _role = roleFor(null);
   List<Goal> _goals = const [];
-  List<ArchivedGoal> _archived = const [];
+  List<Goal> _closed = const [];
   Set<String> _recordedGoalIds = const {};
 
   @override
@@ -66,34 +67,28 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
   }
 
   Future<void> _load() async {
-    final goalsFuture = _firestore.getGoals(widget.uid);
-    final archivedFuture = _firestore.getArchivedGoals(widget.uid);
+    // 追跡中と追跡を終えたものを1回の読み取りで受け取る。
+    // 旧 goal-archive に残っているものの引き上げもこの中で済む。
+    final goalsFuture = _firestore.getAllGoals(widget.uid);
     final settingsFuture = _firestore.getUserSettings(widget.uid);
-    // 「本日記録済み」の判定に使うのは今日のエントリだけ。専用のメソッドを
-    // 足さずに済むよう、getRecentEntries に1日ぶんを頼む。
-    final entriesFuture = _firestore.getRecentEntries(widget.uid, 1);
 
     try {
-      final goals = await goalsFuture;
-      final archived = await archivedFuture;
+      final divided = await goalsFuture;
       final settings = await settingsFuture;
-      final entries = await entriesFuture;
+      // 「本日記録済み」は目標ごとのエントリで判定する
+      // （日々の記録が日記のエントリから目標の配下へ移ったため）
+      final todayEntries = await _firestore.getGoalEntriesOn(
+        widget.uid,
+        divided.active.map((goal) => goal.id),
+        dateKey(DateTime.now()),
+      );
       if (!mounted) return;
 
-      final todayKey = dateKey(DateTime.now());
-      Map<String, dynamic>? todayEntry;
-      for (final entry in entries) {
-        if (entry.key == todayKey) {
-          todayEntry = entry.value;
-          break;
-        }
-      }
-
       setState(() {
-        _goals = goals;
-        _archived = archived;
+        _goals = divided.active;
+        _closed = divided.closed;
         _role = roleFor(settings.selectedRole);
-        _recordedGoalIds = goalsRecordedIn(todayEntry, goals);
+        _recordedGoalIds = goalsRecordedIn(todayEntries, divided.active);
         _loading = false;
         _failed = false;
       });
@@ -119,78 +114,22 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
     ).then((_) => _load());
   }
 
-  // カードのメニュー。見直す・解決した・断念した の3つ。
-  void _showGoalMenu(Goal goal) {
-    final c = context.colors;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: c.cardBg,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  goal.title,
-                  style: DetectiveTextStyles.cardTitle(color: c.textPrimary),
-                ),
-              ),
-            ),
-            Divider(height: 1, color: c.cardBorder),
-            ListTile(
-              leading: Icon(Icons.edit_note, color: c.gold),
-              title: Text(
-                '見立てを見直す',
-                style: TextStyle(fontSize: 15, color: c.textPrimary),
-              ),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _openConsult(target: goal);
-              },
-            ),
-            Divider(height: 1, color: c.cardBorder),
-            ListTile(
-              leading: Icon(Icons.verified_outlined, color: c.gold),
-              title: Text(
-                '解決した',
-                style: TextStyle(fontSize: 15, color: c.textPrimary),
-              ),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _closeGoal(goal, GoalOutcome.solved);
-              },
-            ),
-            Divider(height: 1, color: c.cardBorder),
-            ListTile(
-              // 断念を赤字にしない。AppColors にエラー系の色が無く、
-              // 足すと全テーマ×全ペアのコントラスト検証に判断が増える。
-              // 色を分けなくても、解決と並べば区別は付く。
-              leading: Icon(Icons.inventory_2_outlined, color: c.textSecondary),
-              title: Text(
-                '断念した',
-                style: TextStyle(fontSize: 15, color: c.textPrimary),
-              ),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _closeGoal(goal, GoalOutcome.abandoned);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
+  // 追跡中の事件1件の記録を開く。カードのタップ先。
+  void _openGoalLog(Goal goal) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => GoalLogPage(uid: widget.uid, goal: goal),
       ),
     );
   }
 
-  // 追跡を終える。退避したものは「解決済みの事件」へ移る。
+  // 追跡を終える。閉じたものは「解決済みの事件」へ移る。
   //
   // 断念の文面を責める調子にしないのは、ホームがストリークの途切れを
   // 咎めないのと同じ方針。やめる判断そのものは依頼人のもの。
-  Future<void> _closeGoal(Goal goal, GoalOutcome outcome) async {
-    final solved = outcome == GoalOutcome.solved;
+  Future<void> _closeGoal(Goal goal, GoalStatus status) async {
+    final solved = status == GoalStatus.solved;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -198,8 +137,9 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
         content: Text(
           solved
               ? '「${goal.title}」を解決済みとして記録する。'
-                    '毎日の記録からこの事件の項目が外れる。'
-              : '「${goal.title}」を解決済みの事件へ移す。これまでの記録は消えない。',
+                    '毎日の報告からこの事件の質問が外れる。これまでの記録は残る。'
+              : '「${goal.title}」を解決済みの事件へ移す。'
+                    '毎日の報告から質問が外れるだけで、これまでの記録は残る。',
         ),
         actions: [
           TextButton(
@@ -217,7 +157,12 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
 
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await _firestore.closeGoal(widget.uid, goal, outcome);
+      await _firestore.closeGoal(
+        widget.uid,
+        goal,
+        status,
+        closedAt: dateKey(DateTime.now()),
+      );
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(SnackBar(content: Text('事件を閉じられなかった: $e')));
@@ -225,16 +170,6 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
     }
     if (!mounted) return;
     await _load();
-  }
-
-  // カードの見出しに出す一言。着手からの日数と期限。
-  String _footnoteFor(Goal goal) {
-    final deadline = goal.deadline.isEmpty ? '' : ' / 期限 ${goal.deadline}';
-    if (goal.createdAt.isEmpty) {
-      // 着手日を持たない古いデータでは経過を出さない（分析室と同じ扱い）
-      return deadline.isEmpty ? '着手日は記録されていない' : '期限 ${goal.deadline}';
-    }
-    return '着手から${daysSince(goal.createdAt, DateTime.now())}日$deadline';
   }
 
   @override
@@ -298,9 +233,16 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
                 GoalCaseTile(
                   goal: goal,
                   recordedToday: _recordedGoalIds.contains(goal.id),
-                  footnote: _footnoteFor(goal),
-                  onTap: () => _openConsult(target: goal),
-                  onMenu: () => _showGoalMenu(goal),
+                  footnote: elapsedLabel(goal, DateTime.now()),
+                  // カードのタップ先はその事件の記録。
+                  // 事件に対する操作はカードの下のボタンに分けて出す
+                  // （タップ先が1つなら右端はシェブロンのままでよい）。
+                  onTap: () => _openGoalLog(goal),
+                ),
+                _GoalActions(
+                  onRevise: () => _openConsult(target: goal),
+                  onSolved: () => _closeGoal(goal, GoalStatus.solved),
+                  onAbandoned: () => _closeGoal(goal, GoalStatus.abandoned),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -317,12 +259,13 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
             ),
 
             // 解決済みが1件も無いうちは見出しごと出さない
-            if (_archived.isNotEmpty) ...[
+            if (_closed.isNotEmpty) ...[
               const SizedBox(height: 32),
               const SectionLabel('解決済みの事件', icon: Icons.inventory_2_outlined),
               const SizedBox(height: 12),
-              for (final archived in _archived) ...[
-                _ArchivedGoalTile(archived: archived),
+              for (final goal in _closed) ...[
+                // 追跡を終えても記録は目標の配下に残るので、ここからも辿れる
+                _ClosedGoalTile(goal: goal, onTap: () => _openGoalLog(goal)),
                 const SizedBox(height: 10),
               ],
             ],
@@ -354,6 +297,84 @@ class _NoticeCard extends StatelessWidget {
       child: Text(
         message,
         style: TextStyle(fontSize: 13, color: c.textSecondary, height: 1.5),
+      ),
+    );
+  }
+}
+
+// 事件カードの下に並べる操作。見立てを見直す・解決した・断念した の3つ。
+//
+// bottom sheet のメニューをやめてボタンにしたのは、何ができるのかが
+// 一覧を見た時点で分かるようにするため（長押しやメニューは画面に手がかりが残らない）。
+//
+// 断念を赤字にしない。AppColors にエラー系の色が無く、足すと全テーマ×全ペアの
+// コントラスト検証に判断が増える。色を分けなくても、解決と並べば区別は付く。
+class _GoalActions extends StatelessWidget {
+  final VoidCallback onRevise;
+  final VoidCallback onSolved;
+  final VoidCallback onAbandoned;
+
+  const _GoalActions({
+    required this.onRevise,
+    required this.onSolved,
+    required this.onAbandoned,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Wrap(
+        spacing: 4,
+        children: [
+          _ActionButton(
+            icon: Icons.edit_note,
+            label: '見立てを見直す',
+            color: c.gold,
+            onTap: onRevise,
+          ),
+          _ActionButton(
+            icon: Icons.verified_outlined,
+            label: '解決した',
+            color: c.gold,
+            onTap: onSolved,
+          ),
+          _ActionButton(
+            icon: Icons.inventory_2_outlined,
+            label: '断念した',
+            color: c.textSecondary,
+            onTap: onAbandoned,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 15, color: color),
+      label: Text(label, style: TextStyle(fontSize: 12, color: color)),
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        minimumSize: const Size(0, 36),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }
@@ -421,69 +442,84 @@ class _NewCaseTile extends StatelessWidget {
   }
 }
 
-// 解決・断念した事件の行。
+// 追跡を終えた事件の行。
 //
-// タップ先を持たせていないのは、閉じた事件にできることが今は無いため。
-// 記録そのものは事件簿と分析室に残っており、ここは「何を追い終えたか」の棚。
-class _ArchivedGoalTile extends StatelessWidget {
-  final ArchivedGoal archived;
+// ここは「何を追い終えたか」の棚。記録そのものは目標の配下に残っているので、
+// タップ先（記録一覧）は追跡を終えたあとも開ける。
+class _ClosedGoalTile extends StatelessWidget {
+  final Goal goal;
+  final VoidCallback onTap;
 
-  const _ArchivedGoalTile({required this.archived});
+  const _ClosedGoalTile({required this.goal, required this.onTap});
 
-  // 退避した日。記録が無ければ着手日を出し、それも無ければ何も出さない。
+  // 追跡を終えた月。記録が無ければ着手日を出し、それも無ければ何も出さない。
   String _dateLabel() {
-    final at = archived.archivedAt;
-    if (at != null) {
-      final month = at.month.toString().padLeft(2, '0');
-      return '${at.year}-$month';
-    }
-    return archived.goal.createdAt;
+    // 'YYYY-MM-DD' の頭7文字が 'YYYY-MM'
+    if (goal.closedAt.length >= 7) return goal.closedAt.substring(0, 7);
+    return goal.createdAt;
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final outcome = archived.outcome;
     final date = _dateLabel();
+    // 理由が記録されていないものはバッジを出さない。追跡中が1件だけだった頃に
+    // 押し出されただけのものが混ざっており、解決とも断念とも言えないため。
+    final label = switch (goal.status) {
+      GoalStatus.solved => '解決',
+      GoalStatus.abandoned => '断念',
+      _ => '',
+    };
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: c.cardBg,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: c.cardBorder),
+    return Material(
+      color: c.cardBg,
+      shape: RoundedRectangleBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(4)),
+        side: BorderSide(color: c.cardBorder),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              archived.goal.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                color: c.textSecondary,
-                height: 1.4,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  goal.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: c.textSecondary,
+                    height: 1.4,
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 10),
+              if (label.isNotEmpty) ...[
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: goal.status == GoalStatus.solved
+                        ? c.gold
+                        : c.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+              if (date.isNotEmpty)
+                Text(
+                  date,
+                  style: TextStyle(fontSize: 11, color: c.textSecondary),
+                ),
+            ],
           ),
-          const SizedBox(width: 10),
-          // 結果が読めないものはバッジを出さない。追跡中が1件だけだった頃に
-          // 押し出されただけのものが混ざっており、解決とも断念とも言えないため。
-          if (outcome != null) ...[
-            Text(
-              outcome == GoalOutcome.solved ? '解決' : '断念',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: outcome == GoalOutcome.solved ? c.gold : c.textSecondary,
-              ),
-            ),
-            const SizedBox(width: 10),
-          ],
-          if (date.isNotEmpty)
-            Text(date, style: TextStyle(fontSize: 11, color: c.textSecondary)),
-        ],
+        ),
       ),
     );
   }

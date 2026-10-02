@@ -43,10 +43,17 @@ const Role psychologistRole = Role(
     'intro_modeselect': 'どちらの形で進めていきましょうか。',
     // ── 相談室（目標の壁打ち） ──
     'intro_consult': 'これから、どんなふうになりたいと思っていますか。漠然としたままで構いません。',
+    'revisit_notice': '質問の中の「今日」は、その日のこととして答えてください。',
     'consult_revise': 'どのあたりを見直したいですか。',
     'consult_rethink': 'どのあたりがしっくりきませんでしたか。',
     'consult_saved': 'では、ここから一緒に見ていきましょう。',
     'goal_empty': '目指したいものは、まだ言葉になっていません。',
+    // ── 目標の報告（毎日の進捗確認） ──
+    'intro_goal_checkin': '今追いかけていることについて、少し伺います。',
+    'goal_checkin_switch': '次は、こちらについて。',
+    'goal_checkin_numeric_retry': '数字として読み取れませんでした。数字だけで教えてください。',
+    'goal_checkin_done': 'お話しくださってありがとうございます。記録しておきます。',
+    'goal_checkin_recorded': '今日の分は、もう伺っています。',
   },
   // ボタン選択への固定リアクション（API不使用）。ネガティブな評価はしない。
   reactionTexts: {

@@ -26,8 +26,13 @@ import '../widgets/message_bubble.dart';
 // 「解決した / 断念した」をここに置いていないのも同じ理由で、一本道に分岐を足さない
 // （追跡をやめる操作は事件一覧の仕事）。
 //
-// 会話ログは保存しない。この画面の成果物は目標そのもの（users/{uid}/goals/{goalId}）であり、
-// entries/{date}/conversation は日記のためのパスなので流用しない。
+// 壁打ちの会話は保存しない。この画面の成果物は目標そのもの
+// （users/{uid}/goals/{goalId}）で、見立てが決まったあとに経緯を読み返す先が無いため。
+//
+// 毎日の報告（GoalCheckInPage）は逆で、会話を
+// goals/{goalId}/entries/{date}/conversation に残す。記録一覧から
+// 「その日、何を聞かれて何と答えたか」を読み返すからで、保存する／しないの違いは
+// 読み返す先があるかどうかで決めている。
 enum _Stage {
   talking, // 壁打ち中
   reviewing, // AIが見立てを出した。採用するか確認している
@@ -300,7 +305,11 @@ class _ConsultPageState extends State<ConsultPage> {
         settings.copyWith(
           customQuestions: [
             ...settings.customQuestions,
-            CustomQuestion(id: const Uuid().v4(), text: text),
+            CustomQuestion(
+              id: const Uuid().v4(),
+              text: text,
+              source: CustomQuestionSource.consult,
+            ),
           ],
         ),
       );

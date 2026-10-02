@@ -8,8 +8,11 @@
 //   思い出し     : q_morning / q_afternoon / q_evening
 //   ナレーション : intro_start / intro_custom / confirm_include / intro_recall / intro_event /
 //                  intro_modeselect / ask_addendum
+//   再捜査       : revisit_notice
 //   相談室       : intro_consult / consult_revise / consult_rethink /
 //                  consult_saved / goal_empty
+//   目標の報告   : intro_goal_checkin / goal_checkin_switch / goal_checkin_numeric_retry /
+//                  goal_checkin_done / goal_checkin_recorded
 //
 // 注: choices（朝/昼/夜・睡眠時間など）と custom_i（ユーザー定義質問）は Role に持たせない。
 //     前者は回答データとして保存・パースされる固定値、後者はユーザー入力そのものを使うため。

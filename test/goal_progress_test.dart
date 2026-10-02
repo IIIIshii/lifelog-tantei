@@ -180,10 +180,198 @@ void main() {
       expect(hasAnswerForGoal(const <String, dynamic>{}, diet), isFalse);
     });
 
-    test('goalsRecordedIn は答えた目標の id だけを集める', () {
-      final entry = entryWith({'goal_g1': '達成', 'sleep': '7時間'});
-      expect(goalsRecordedIn(entry, const [diet, books]), {'diet'});
-      expect(goalsRecordedIn(null, const [diet, books]), isEmpty);
+    test('goalsRecordedIn は目標ごとのエントリを見て、答えた目標の id だけを集める', () {
+      // 引数は「目標 id → その日のエントリ」。日々の記録が目標の配下へ移ったので、
+      // 1つのエントリを共有せず目標ごとに別のドキュメントを見る。
+      final entries = {
+        'diet': entryWith({'goal_w1': '62.5'}),
+        'books': entryWith({'goal_r1': ''}), // スキップは答えたことにしない
+      };
+      expect(goalsRecordedIn(entries, const [diet, books]), {'diet'});
+    });
+
+    test('goalsRecordedIn はエントリの無い目標を数えない', () {
+      expect(
+        goalsRecordedIn(const <String, Map<String, dynamic>?>{}, const [
+          diet,
+          books,
+        ]),
+        isEmpty,
+      );
+    });
+  });
+
+  group('answerFor / numericFor', () {
+    final entry = <String, dynamic>{
+      'answers': {'goal_a': '達成', 'goal_blank': ''},
+      'numericAnswers': {'goal_n': 62.5, 'goal_int': 8000},
+    };
+
+    test('回答文字列を取り出す。空文字は未回答として null', () {
+      expect(answerFor(entry, 'goal_a'), '達成');
+      expect(answerFor(entry, 'goal_blank'), isNull);
+      expect(answerFor(entry, 'goal_missing'), isNull);
+    });
+
+    test('エントリが無い日・answers を持たない日は null', () {
+      expect(answerFor(null, 'goal_a'), isNull);
+      expect(answerFor(const <String, dynamic>{}, 'goal_a'), isNull);
+    });
+
+    test('数値は double で返る（int で保存されていても）', () {
+      expect(numericFor(entry, 'goal_n'), 62.5);
+      expect(numericFor(entry, 'goal_int'), 8000.0);
+    });
+
+    test('数値として控えられていないキーは null', () {
+      expect(numericFor(entry, 'goal_a'), isNull);
+      expect(numericFor(null, 'goal_n'), isNull);
+    });
+  });
+
+  group('checkCounts', () {
+    test('答えた日を母数に、達成した日を分子に数える', () {
+      final entries = [
+        _entry('2026-09-01', answers: {'goal_a': '達成'}),
+        _entry('2026-09-02', answers: {'goal_a': '未達'}),
+        _entry('2026-09-03', answers: {'goal_a': '達成'}),
+      ];
+      final counts = checkCounts(entries, 'goal_a');
+      expect(counts.answered, 3);
+      expect(counts.done, 2);
+    });
+
+    test('答えていない日・想定外の文字列は母数に入れない', () {
+      final entries = [
+        _entry('2026-09-01', answers: {'goal_a': '達成'}),
+        _entry('2026-09-02', answers: {'goal_a': ''}),
+        _entry('2026-09-03', answers: {'goal_a': 'たぶん'}),
+        _entry('2026-09-04'),
+      ];
+      final counts = checkCounts(entries, 'goal_a');
+      expect(counts.answered, 1);
+      expect(counts.done, 1);
+    });
+
+    test('一度も答えていなければ 0 / 0（checkRate は null になる）', () {
+      final counts = checkCounts(const [], 'goal_a');
+      expect(counts.answered, 0);
+      expect(counts.done, 0);
+      expect(checkRate(const [], 'goal_a'), isNull);
+    });
+  });
+
+  group('elapsedLabel', () {
+    final today = DateTime(2026, 9, 20);
+
+    test('着手からの日数を出す', () {
+      const goal = Goal(id: 'g', title: '5kg減らす', createdAt: '2026-09-10');
+      expect(elapsedLabel(goal, today), contains('着手から10日'));
+    });
+
+    test('期限があれば添える', () {
+      const goal = Goal(
+        id: 'g',
+        title: '5kg減らす',
+        createdAt: '2026-09-10',
+        deadline: '2026-12-31',
+      );
+      expect(elapsedLabel(goal, today), contains('2026-12-31'));
+    });
+
+    test('着手日が無ければ経過を出さない（今日始めたように見せない）', () {
+      const goal = Goal(id: 'g', title: '5kg減らす');
+      expect(elapsedLabel(goal, today), isNot(contains('着手から')));
+    });
+
+    test('着手日が無く期限だけあるときは期限を出す', () {
+      const goal = Goal(id: 'g', title: '5kg減らす', deadline: '2026-12-31');
+      expect(elapsedLabel(goal, today), '期限 2026-12-31');
+    });
+  });
+
+  group('mergeGoalAnswers', () {
+    test('同じ日の日記と目標の回答が1枚に重なる', () {
+      final diary = [
+        _entry('2026-09-20', answers: {'sleep': '7時間'}),
+      ];
+      final goals = {
+        'diet': [
+          _entry(
+            '2026-09-20',
+            answers: {'goal_w1': '62.5'},
+            numericAnswers: {'goal_w1': 62.5},
+          ),
+        ],
+      };
+      final merged = mergeGoalAnswers(diary, goals);
+      expect(merged.length, 1);
+      final answers = merged.single.value['answers'] as Map<String, dynamic>;
+      expect(answers['sleep'], '7時間');
+      expect(answers['goal_w1'], '62.5');
+      expect(
+        (merged.single.value['numericAnswers']
+            as Map<String, dynamic>)['goal_w1'],
+        62.5,
+      );
+    });
+
+    test('日付は和集合。目標だけ答えた日も材料に残る', () {
+      final diary = [
+        _entry('2026-09-19', answers: {'sleep': '7時間'}),
+      ];
+      final goals = {
+        'diet': [
+          _entry('2026-09-20', answers: {'goal_w1': '62.5'}),
+        ],
+      };
+      final merged = mergeGoalAnswers(diary, goals);
+      expect(merged.map((e) => e.key).toSet(), {'2026-09-19', '2026-09-20'});
+    });
+
+    test('複数の目標の回答が同じ日に共存する', () {
+      final goals = {
+        'diet': [
+          _entry('2026-09-20', answers: {'goal_w1': '62.5'}),
+        ],
+        'books': [
+          _entry('2026-09-20', answers: {'goal_r1': '達成'}),
+        ],
+      };
+      final merged = mergeGoalAnswers(const [], goals);
+      final answers = merged.single.value['answers'] as Map<String, dynamic>;
+      expect(answers.keys.toSet(), {'goal_w1', 'goal_r1'});
+    });
+
+    test('日記本文は持ち越される', () {
+      final diary = [
+        MapEntry('2026-09-20', <String, dynamic>{
+          'diary': '本文',
+          'diaryMode': 'x',
+        }),
+      ];
+      final merged = mergeGoalAnswers(diary, const {});
+      expect(merged.single.value['diary'], '本文');
+      expect(merged.single.value['diaryMode'], 'x');
+    });
+
+    test('元のエントリを書き換えない（画面のキャッシュを壊さない）', () {
+      final diaryAnswers = <String, dynamic>{'sleep': '7時間'};
+      final diary = [
+        MapEntry('2026-09-20', <String, dynamic>{'answers': diaryAnswers}),
+      ];
+      final goals = {
+        'diet': [
+          _entry('2026-09-20', answers: {'goal_w1': '62.5'}),
+        ],
+      };
+      mergeGoalAnswers(diary, goals);
+      expect(diaryAnswers.keys, ['sleep']);
+      expect(diary.single.value['answers'], same(diaryAnswers));
+    });
+
+    test('どちらも空なら空で返る', () {
+      expect(mergeGoalAnswers(const [], const {}), isEmpty);
     });
   });
 }

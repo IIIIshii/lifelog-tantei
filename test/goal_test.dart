@@ -120,8 +120,12 @@ void main() {
         ],
         suggestedQuestions: ['今日の食事で満足できたのはどれ？'],
         createdAt: '2026-09-19',
+        status: GoalStatus.solved,
+        closedAt: '2026-10-01',
       );
       final restored = Goal.fromMap(original.toMap());
+      expect(restored.status, GoalStatus.solved);
+      expect(restored.closedAt, '2026-10-01');
       expect(restored.id, 'g1');
       expect(restored.title, '3ヶ月で5kg減らす');
       expect(restored.metric, '体重62.0kg以下');
@@ -427,27 +431,6 @@ void main() {
     });
   });
 
-  // ── 追跡を終えた理由 ────────────────────────────────────────
-  group('GoalOutcome', () {
-    test('保存文字列と往復する', () {
-      expect(
-        goalOutcomeFrom(goalOutcomeTo(GoalOutcome.solved)),
-        GoalOutcome.solved,
-      );
-      expect(
-        goalOutcomeFrom(goalOutcomeTo(GoalOutcome.abandoned)),
-        GoalOutcome.abandoned,
-      );
-    });
-
-    test('未知の値と欠損は null（断念と誤って刻印しない）', () {
-      expect(goalOutcomeFrom(null), isNull);
-      expect(goalOutcomeFrom(''), isNull);
-      expect(goalOutcomeFrom('Solved'), isNull);
-      expect(goalOutcomeFrom('archived'), isNull);
-    });
-  });
-
   // ── AI応答の件数制限 ────────────────────────────────────────
   group('fromAiMap の maxActions', () {
     Map<String, dynamic> aiMapWith(int count) => {
@@ -493,13 +476,40 @@ void main() {
       Map<String, dynamic> data,
     ) => MapEntry(id, data);
 
-    test('current は legacy 側へ、それ以外は goals へ振り分ける', () {
+    test('current は legacy 側へ、それ以外は追跡中へ振り分ける', () {
       final result = partitionGoalDocs([
         doc('current', {'id': 'old', 'title': '旧目標'}),
         doc('abc', {'id': 'abc', 'title': '新目標'}),
       ]);
       expect(result.legacy?.title, '旧目標');
-      expect(result.goals.map((g) => g.id), ['abc']);
+      expect(result.active.map((g) => g.id), ['abc']);
+    });
+
+    test('status で追跡中と追跡を終えたものに分かれる', () {
+      final result = partitionGoalDocs([
+        doc('a', {'id': 'a', 'title': '追跡中'}),
+        doc('b', {'id': 'b', 'title': '解決', 'status': 'solved'}),
+        doc('c', {'id': 'c', 'title': '断念', 'status': 'abandoned'}),
+        doc('d', {'id': 'd', 'title': '理由不明', 'status': 'closed'}),
+        doc('e', {'id': 'e', 'title': '明示的に追跡中', 'status': 'active'}),
+      ]);
+      expect(result.active.map((g) => g.id), ['a', 'e']);
+      expect(result.closed.map((g) => g.id), ['b', 'c', 'd']);
+    });
+
+    test('status を持たない既存ドキュメントは追跡中に入る', () {
+      final result = partitionGoalDocs([
+        doc('a', {'id': 'a', 'title': '目標'}),
+      ]);
+      expect(result.active.single.id, 'a');
+      expect(result.closed, isEmpty);
+    });
+
+    test('旧 current は status を持たないので追跡中として扱われる', () {
+      final result = partitionGoalDocs([
+        doc('current', {'title': '旧目標'}),
+      ], newId: () => 'issued-id');
+      expect(result.legacy?.isActive, isTrue);
     });
 
     test('current が id を持たなければ発行された id が入る', () {
@@ -513,7 +523,7 @@ void main() {
       final result = partitionGoalDocs([
         doc('doc-1', {'title': '目標'}),
       ]);
-      expect(result.goals.single.id, 'doc-1');
+      expect(result.active.single.id, 'doc-1');
     });
 
     test('タイトルの無いドキュメントは捨てる（空の枠を作らない）', () {
@@ -522,7 +532,7 @@ void main() {
         doc('blank', {'id': 'blank', 'title': '   '}),
         doc('ok', {'id': 'ok', 'title': '目標'}),
       ]);
-      expect(result.goals.map((g) => g.id), ['ok']);
+      expect(result.active.map((g) => g.id), ['ok']);
       expect(result.legacy, isNull);
     });
 
@@ -531,12 +541,12 @@ void main() {
         doc('a', {'id': 'a', 'title': '目標'}),
       ]);
       expect(result.legacy, isNull);
-      expect(result.goals.length, 1);
+      expect(result.active.length, 1);
     });
 
     test('何も無ければ空で返る', () {
       final result = partitionGoalDocs(const []);
-      expect(result.goals, isEmpty);
+      expect(result.active, isEmpty);
       expect(result.legacy, isNull);
     });
   });
@@ -607,24 +617,222 @@ void main() {
     });
   });
 
-  // ── 解決済みの並び順 ────────────────────────────────────────
-  group('ArchivedGoal.byNewest', () {
-    test('退避が新しい順に並び、日時の無いものは末尾へ回る', () {
-      final list = [
-        ArchivedGoal(
-          goal: const Goal(id: 'none', title: '日時なし'),
-          archivedAt: null,
-        ),
-        ArchivedGoal(
-          goal: const Goal(id: 'old', title: '古'),
-          archivedAt: DateTime.utc(2026, 1, 1),
-        ),
-        ArchivedGoal(
-          goal: const Goal(id: 'new', title: '新'),
-          archivedAt: DateTime.utc(2026, 9, 1),
-        ),
-      ]..sort(ArchivedGoal.byNewest);
-      expect(list.map((a) => a.goal.id), ['new', 'old', 'none']);
+  // ── 過去の日付を作り直すときの絞り込み ──────────────────────
+  group('goalsTrackedOn', () {
+    const started0901 = Goal(id: 'a', title: '9月1日着手', createdAt: '2026-09-01');
+    const started0915 = Goal(
+      id: 'b',
+      title: '9月15日着手',
+      createdAt: '2026-09-15',
+    );
+    const unknownStart = Goal(id: 'c', title: '着手日なし');
+
+    test('着手日以降の日付では聞く（着手当日を含む）', () {
+      expect(
+        goalsTrackedOn(const [started0901], '2026-09-01').map((g) => g.id),
+        ['a'],
+      );
+      expect(
+        goalsTrackedOn(const [started0901], '2026-09-20').map((g) => g.id),
+        ['a'],
+      );
+    });
+
+    test('着手より前の日付では聞かない（達成率の母数を汚さない）', () {
+      expect(goalsTrackedOn(const [started0915], '2026-09-14'), isEmpty);
+    });
+
+    test('混在しても着手済みのものだけが残る', () {
+      expect(
+        goalsTrackedOn(const [
+          started0901,
+          started0915,
+        ], '2026-09-10').map((g) => g.id),
+        ['a'],
+      );
+    });
+
+    test('着手日を持たない目標は落とさない', () {
+      expect(
+        goalsTrackedOn(const [unknownStart], '2020-01-01').map((g) => g.id),
+        ['c'],
+      );
+    });
+
+    test('月・年をまたいでも辞書順で正しく比較する', () {
+      const started1231 = Goal(id: 'd', title: '年末着手', createdAt: '2026-12-31');
+      expect(goalsTrackedOn(const [started1231], '2026-09-30'), isEmpty);
+      expect(
+        goalsTrackedOn(const [started1231], '2027-01-01').map((g) => g.id),
+        ['d'],
+      );
+    });
+  });
+
+  group('GoalStatus', () {
+    test('保存文字列と往復する', () {
+      for (final status in GoalStatus.values) {
+        expect(goalStatusFrom(goalStatusTo(status)), status);
+      }
+    });
+
+    test('未知の値と欠損は active（status を持たない既存ドキュメントは追跡中だった）', () {
+      expect(goalStatusFrom(null), GoalStatus.active);
+      expect(goalStatusFrom(''), GoalStatus.active);
+      expect(goalStatusFrom('ｱｸﾃｨﾌﾞ'), GoalStatus.active);
+    });
+
+    test('isActive は active のときだけ true', () {
+      const active = Goal(id: 'g1', title: '追跡中');
+      expect(active.isActive, isTrue);
+      expect(active.copyWith(status: GoalStatus.solved).isActive, isFalse);
+      expect(active.copyWith(status: GoalStatus.abandoned).isActive, isFalse);
+      expect(active.copyWith(status: GoalStatus.closed).isActive, isFalse);
+    });
+  });
+
+  group('goalStatusFromLegacyOutcome', () {
+    test('解決・断念はそのまま写る', () {
+      expect(goalStatusFromLegacyOutcome('solved'), GoalStatus.solved);
+      expect(goalStatusFromLegacyOutcome('abandoned'), GoalStatus.abandoned);
+    });
+
+    test('読めない値と欠損は closed（断念と誤って刻印しない）', () {
+      expect(goalStatusFromLegacyOutcome(null), GoalStatus.closed);
+      expect(goalStatusFromLegacyOutcome(''), GoalStatus.closed);
+      expect(goalStatusFromLegacyOutcome('pushed_out'), GoalStatus.closed);
+    });
+
+    test('押し出されただけのものを active に戻さない（枠と毎日の質問が復活しないこと）', () {
+      expect(goalStatusFromLegacyOutcome(null), isNot(GoalStatus.active));
+    });
+  });
+
+  group('Goal.byClosedDesc', () {
+    test('追跡を終えた日の新しい順に並ぶ', () {
+      const older = Goal(id: 'a', title: '古い', closedAt: '2026-08-01');
+      const newer = Goal(id: 'b', title: '新しい', closedAt: '2026-09-01');
+      final sorted = [older, newer]..sort(Goal.byClosedDesc);
+      expect(sorted.map((g) => g.id), ['b', 'a']);
+    });
+
+    test('closedAt が空のものは末尾へ回る', () {
+      const dated = Goal(id: 'a', title: '日付あり', closedAt: '2026-08-01');
+      const undated = Goal(id: 'b', title: '日付なし');
+      final sorted = [undated, dated]..sort(Goal.byClosedDesc);
+      expect(sorted.map((g) => g.id), ['a', 'b']);
+    });
+
+    test('同じ日なら着手日の新しい順（描画のたびに入れ替わらない）', () {
+      const first = Goal(
+        id: 'a',
+        title: '先に着手',
+        createdAt: '2026-07-01',
+        closedAt: '2026-09-01',
+      );
+      const second = Goal(
+        id: 'b',
+        title: '後に着手',
+        createdAt: '2026-08-01',
+        closedAt: '2026-09-01',
+      );
+      final sorted = [first, second]..sort(Goal.byClosedDesc);
+      expect(sorted.map((g) => g.id), ['b', 'a']);
+    });
+  });
+
+  group('goalFromArchiveDoc', () {
+    test('outcome が status へ写り、closedAt が入る', () {
+      final goal = goalFromArchiveDoc('doc1', {
+        'id': 'g1',
+        'title': '5kg減らす',
+        'outcome': 'solved',
+      }, closedAt: '2026-09-20');
+      expect(goal.id, 'g1');
+      expect(goal.status, GoalStatus.solved);
+      expect(goal.closedAt, '2026-09-20');
+    });
+
+    test('id が欠けていればドキュメントIDで埋まる', () {
+      final goal = goalFromArchiveDoc('doc1', {
+        'title': '5kg減らす',
+        'outcome': 'abandoned',
+      }, closedAt: '');
+      expect(goal.id, 'doc1');
+      expect(goal.status, GoalStatus.abandoned);
+      expect(goal.closedAt, isEmpty);
+    });
+
+    test('outcome の記録が無ければ closed', () {
+      final goal = goalFromArchiveDoc('doc1', {
+        'title': '押し出されただけの事件',
+      }, closedAt: '');
+      expect(goal.status, GoalStatus.closed);
+    });
+  });
+
+  group('buildGoalQuestionQueue', () {
+    const weight = GoalAction(
+      id: 'a1',
+      label: '体重',
+      type: GoalActionType.numeric,
+      unit: 'kg',
+    );
+    const gym = GoalAction(id: 'a2', label: 'ジムに行く');
+    const pages = GoalAction(id: 'b1', label: '読んだページ数');
+
+    const diet = Goal(
+      id: 'g1',
+      title: '5kg減らす',
+      actions: [weight, gym],
+      createdAt: '2026-09-20',
+    );
+    const study = Goal(
+      id: 'g2',
+      title: '本を読む',
+      actions: [pages],
+      createdAt: '2026-09-10',
+    );
+
+    test('目標の順のまま、各目標の項目を定義順に並べる', () {
+      final queue = buildGoalQuestionQueue(const [diet, study]);
+      expect(queue.map((q) => q.action.id), ['a1', 'a2', 'b1']);
+      expect(queue.map((q) => q.goal.id), ['g1', 'g1', 'g2']);
+    });
+
+    test('max で切り詰める。溢れた場合は後ろ（古い目標）の質問から落ちる', () {
+      final queue = buildGoalQuestionQueue(const [diet, study], max: 2);
+      expect(queue.map((q) => q.action.id), ['a1', 'a2']);
+    });
+
+    test('max が0以下なら1件も返さない', () {
+      expect(buildGoalQuestionQueue(const [diet], max: 0), isEmpty);
+      expect(buildGoalQuestionQueue(const [diet], max: -1), isEmpty);
+    });
+
+    test('目標が無ければ空', () {
+      expect(buildGoalQuestionQueue(const []), isEmpty);
+    });
+
+    test('項目を持たない目標は列に現れない（質問できるものが無い）', () {
+      const noActions = Goal(id: 'g3', title: '項目なし', createdAt: '2026-09-25');
+      final queue = buildGoalQuestionQueue(const [noActions, study]);
+      expect(queue.map((q) => q.goal.id), ['g2']);
+    });
+
+    test('既定の上限は全目標合計の枠', () {
+      final many = [
+        for (var i = 0; i < 4; i++)
+          Goal(
+            id: 'g$i',
+            title: '目標$i',
+            createdAt: '2026-09-0$i',
+            actions: [
+              for (var j = 0; j < 3; j++) GoalAction(id: 'a$i$j', label: '項目$j'),
+            ],
+          ),
+      ];
+      expect(buildGoalQuestionQueue(many).length, kMaxTotalGoalActions);
     });
   });
 }

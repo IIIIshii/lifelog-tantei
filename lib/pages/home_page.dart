@@ -15,7 +15,6 @@ import '../widgets/goal_case_tile.dart';
 import '../widgets/section_label.dart';
 import '../widgets/status_badge.dart';
 import 'diary_detail_page.dart';
-import 'diary_page.dart';
 import 'role_select_page.dart';
 import 'self_analysis_page.dart';
 
@@ -49,16 +48,28 @@ class HomePage extends StatefulWidget {
   /// 読み込み前は null。
   final ValueNotifier<bool?> todayDone;
 
+  /// 今日聞くべき目標があるかを MainShell へ伝える出力。
+  /// FAB が目標の報告画面を挟むかの判定に使う。ここが読み込んだ目標を
+  /// そのまま渡すことで、FAB のために Firestore をもう一度読まずに済ませる。
+  final ValueNotifier<bool> hasGoals;
+
   /// 「追跡中の事件」から相談室タブへ移動するためのコールバック。
   /// タブの index は MainShell の関心事なので、ここでは持たない。
   final VoidCallback onOpenConsultTab;
+
+  /// 記録の動線（目標の報告 → 日記の捜査）を開くコールバック。
+  /// 順番の決定は MainShell の仕事なので、ここでは呼ぶだけにする
+  /// （FAB とカードのタップで挙動が食い違わないようにするため）。
+  final VoidCallback onOpenDiary;
 
   const HomePage({
     super.key,
     required this.uid,
     required this.refreshSignal,
     required this.todayDone,
+    required this.hasGoals,
     required this.onOpenConsultTab,
+    required this.onOpenDiary,
   });
 
   @override
@@ -127,16 +138,15 @@ class _HomePageState extends State<HomePage> {
         }
       }
 
-      // 目標の記録有無は diary の有無とは別に見る。
-      // 行動項目だけ答えて日記を作っていない日も「今日は記録した」なので、
-      // 絞り込み前の entries から今日のドキュメントを拾う。
-      Map<String, dynamic>? todayEntry;
-      for (final e in entries) {
-        if (e.key == todayKey) {
-          todayEntry = e.value;
-          break;
-        }
-      }
+      // 目標の記録有無は日記とは別のコレクション（目標ごとの entries）を見る。
+      // 日記を作っていない日でも目標の報告だけ済んでいることがあるため、
+      // 日記の有無とは独立に判定する。
+      final todayGoalEntries = await _firestore.getGoalEntriesOn(
+        widget.uid,
+        goals.map((goal) => goal.id),
+        todayKey,
+      );
+      if (!mounted) return;
 
       setState(() {
         _written = withDiary.map((e) => e.key).toSet();
@@ -145,11 +155,14 @@ class _HomePageState extends State<HomePage> {
         _role = roleFor(settings.selectedRole);
         _selfAnalysis = selfAnalysis;
         _goals = goals;
-        _recordedGoalIds = goalsRecordedIn(todayEntry, goals);
+        _recordedGoalIds = goalsRecordedIn(todayGoalEntries, goals);
         _loading = false;
         _failed = false;
       });
       widget.todayDone.value = todayDiary != null;
+      // 今日聞くべき事件があるかを FAB へ伝える。
+      // 着手より前の事件は今日の報告に出ないので、絞り込んだ結果で判定する。
+      widget.hasGoals.value = goalsTrackedOn(goals, todayKey).isNotEmpty;
     } catch (_) {
       if (!mounted) return;
       // 失敗しても RefreshIndicator で引き直せるので、画面は保ったまま印だけ出す
@@ -160,20 +173,27 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 本日の事件カードのタップ：記録済みなら詳細、未記録なら対話画面へ
+  // 本日の事件カードのタップ：記録済みなら詳細、未記録なら記録の動線へ。
+  //
+  // 未記録のときに DiaryPage を直接開かず MainShell のコールバックに委ねるのは、
+  // FAB と同じ順番（目標の報告 → 日記の捜査）を通すため。
   void _openToday() {
     final diary = _todayDiary;
-    final route = diary != null
-        ? MaterialPageRoute<void>(
-            builder: (_) => DiaryDetailPage(
-              date: dateKey(DateTime.now()),
-              diary: diary,
-              uid: widget.uid,
-              firestore: _firestore,
-            ),
-          )
-        : MaterialPageRoute<void>(builder: (_) => const DiaryPage());
-    Navigator.push(context, route).then((_) => _load());
+    if (diary == null) {
+      widget.onOpenDiary();
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => DiaryDetailPage(
+          date: dateKey(DateTime.now()),
+          diary: diary,
+          uid: widget.uid,
+          firestore: _firestore,
+        ),
+      ),
+    ).then((_) => _load());
   }
 
   // 担当探偵の行のタップ：ロール選択ページへ。

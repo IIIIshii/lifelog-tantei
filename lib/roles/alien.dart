@@ -42,10 +42,17 @@ const Role alienRole = Role(
     'intro_modeselect': '記録ノ方式をセンタクセヨ。',
     // ── 相談室（目標の壁打ち） ──
     'intro_consult': 'ナニを目指すノだ？ ワレに教エロ。バクゼンとしたままでヨイ。',
+    'revisit_notice': 'シツモンの「今日」ハ、ソノ日のコトだとカイシャクセヨ。',
     'consult_revise': 'ドコを修正スル？ 申告セヨ。',
     'consult_rethink': 'ドコがチガウ？ 指摘セヨ。',
     'consult_saved': 'ケイヤク成立。本日ヨリ観測を開始スル。',
     'goal_empty': '目指すモノは、まだ観測サレていない。',
+    // ── 目標の報告（毎日の進捗確認） ──
+    'intro_goal_checkin': '観測中ノ案件について報告セヨ。',
+    'goal_checkin_switch': 'ツギはコノ案件だ。',
+    'goal_checkin_numeric_retry': 'スウチを検出デキナカッタ。数字ノミで入力セヨ。',
+    'goal_checkin_done': '報告を受領シタ。記録スル。',
+    'goal_checkin_recorded': '本日ノ報告ハ既に受領シテイル。',
   },
   // ボタン選択への固定リアクション（API不使用）。ネガティブな評価はしない。
   reactionTexts: {

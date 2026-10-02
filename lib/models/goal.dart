@@ -61,28 +61,51 @@ String goalActionTypeTo(GoalActionType type) =>
     type == GoalActionType.numeric ? 'numeric' : 'check';
 
 // ──────────────────────────────────────────────────────────────
-// 追跡を終えた理由
-// ──────────────────────────────────────────────────────────────
-enum GoalOutcome {
-  solved, // 解決した
-  abandoned, // 断念した（追うのをやめた）
-}
-
-String goalOutcomeTo(GoalOutcome outcome) =>
-    outcome == GoalOutcome.solved ? 'solved' : 'abandoned';
-
-// 保存文字列 → enum。読み取れない値・記録の無いものは null を返す。
+// 追跡の状態
 //
-// GoalActionType のように既定値へ倒さないのは、アクティブな目標が1件だった頃の
-// goal-archive に「新しい目標を立てたので押し出された」だけのものが入っているため。
-// それは解決でも断念でもなく、どちらかへ寄せると嘘の刻印になる。
-// 記録が無いことと、記録して0だったことは意味が違う
-// （分析室が「—」と「0%」を区別しているのと同じ理由）。
-GoalOutcome? goalOutcomeFrom(String? raw) {
-  if (raw == 'solved') return GoalOutcome.solved;
-  if (raw == 'abandoned') return GoalOutcome.abandoned;
-  return null;
+// goal-archive へドキュメントを移す方式をやめ、goals/{goalId} に留めたまま
+// この status で「追跡中」と「追跡を終えた」を区別する。
+// 目標が配下に日々の記録（entries サブコレクション）を持つようになったためで、
+// Firestore はドキュメントを移してもサブコレクションを一緒に動かさない
+// ―― 移す方式のままだと、解決した事件の記録が置き去りになる。
+// ──────────────────────────────────────────────────────────────
+enum GoalStatus {
+  active, // 追跡中
+  solved, // 解決した
+  abandoned, // 断念した
+  closed, // 追跡を終えたが、理由が記録されていない（旧 goal-archive からの移行でのみ付く）
 }
+
+String goalStatusTo(GoalStatus status) => switch (status) {
+  GoalStatus.active => 'active',
+  GoalStatus.solved => 'solved',
+  GoalStatus.abandoned => 'abandoned',
+  GoalStatus.closed => 'closed',
+};
+
+// 保存文字列 → enum。未知の値・記録の無いものは active。
+//
+// GoalOutcome と違って既定値へ倒してよいのは、status を持たないドキュメントが
+// 「goals コレクションに置かれていた＝追跡中だったもの」に限られるため。
+// この既定のおかげで、既存の目標は書き戻しなしでそのまま移行が済む。
+GoalStatus goalStatusFrom(String? raw) => switch (raw) {
+  'solved' => GoalStatus.solved,
+  'abandoned' => GoalStatus.abandoned,
+  'closed' => GoalStatus.closed,
+  _ => GoalStatus.active,
+};
+
+// 旧 goal-archive の outcome を status へ読み替える。
+//
+// 読めない値・記録の無いものは closed。追跡中が1件だけだった頃の archive には
+// 「新しい目標を立てたので押し出された」だけのものが入っており、それは解決でも
+// 断念でもない（goalOutcomeFrom の説明を参照）。active に戻さないのは、
+// 押し出されたものが蘇って kMaxTrackedGoals の枠を食い、毎日の質問まで復活するため。
+GoalStatus goalStatusFromLegacyOutcome(String? raw) => switch (raw) {
+  'solved' => GoalStatus.solved,
+  'abandoned' => GoalStatus.abandoned,
+  _ => GoalStatus.closed,
+};
 
 // 保存値・AI応答から数値を取り出す。
 // AI が数字を文字列で返してくることがあるため（responseSchema で number を
@@ -167,6 +190,16 @@ class Goal {
   final List<String> suggestedQuestions; // AIが提案した独自質問の候補（未承認のもの）
   final String createdAt; // 'YYYY-MM-DD'。経過日数の起点
 
+  /// 追跡中か、追跡を終えたか。
+  final GoalStatus status;
+
+  /// 追跡を終えた日 'YYYY-MM-DD'。追跡中は空文字。
+  ///
+  /// DateTime ではなく文字列で持つのは createdAt / deadline と揃え、
+  /// このファイルを cloud_firestore に依存させないため
+  /// （Timestamp との変換は FirestoreService の仕事に留める）。
+  final String closedAt;
+
   const Goal({
     this.id = '',
     this.title = '',
@@ -175,6 +208,8 @@ class Goal {
     this.actions = const [],
     this.suggestedQuestions = const [],
     this.createdAt = '',
+    this.status = GoalStatus.active,
+    this.closedAt = '',
   });
 
   // 未設定（まだ目標を立てていない）状態を返すファクトリ。
@@ -262,6 +297,8 @@ class Goal {
               .toList() ??
           const [],
       createdAt: map['createdAt'] as String? ?? '',
+      status: goalStatusFrom(map['status'] as String?),
+      closedAt: map['closedAt'] as String? ?? '',
     );
   }
 
@@ -273,6 +310,8 @@ class Goal {
     'actions': actions.map((a) => a.toMap()).toList(),
     'suggestedQuestions': suggestedQuestions,
     'createdAt': createdAt,
+    'status': goalStatusTo(status),
+    'closedAt': closedAt,
   };
 
   // 一部のフィールドだけ変更した新しいインスタンスを返すメソッド
@@ -284,6 +323,8 @@ class Goal {
     List<GoalAction>? actions,
     List<String>? suggestedQuestions,
     String? createdAt,
+    GoalStatus? status,
+    String? closedAt,
   }) {
     return Goal(
       id: id ?? this.id,
@@ -293,6 +334,8 @@ class Goal {
       actions: actions ?? this.actions,
       suggestedQuestions: suggestedQuestions ?? this.suggestedQuestions,
       createdAt: createdAt ?? this.createdAt,
+      status: status ?? this.status,
+      closedAt: closedAt ?? this.closedAt,
     );
   }
 
@@ -300,6 +343,9 @@ class Goal {
   // title を基準にするのは、目標としてホームに出せる最低限がそれだから
   // （行動項目や期限は無くても「何を目指しているか」は成立する）。
   bool get isEmpty => title.trim().isEmpty;
+
+  // まだ追っているか。毎日の質問に出すか、ホーム・相談室の「追跡中」に並べるかの判定に使う。
+  bool get isActive => status == GoalStatus.active;
 
   // 他に追っている目標を1行で表す。
   // 相談室で「同じ狙いの事件を重ねて立てない」ための文脈として AI へ渡す。
@@ -325,12 +371,34 @@ class Goal {
     return byDate != 0 ? byDate : a.id.compareTo(b.id);
   }
 
+  // 追跡を終えたものが新しい順に来る並び順（「解決済みの事件」の棚で使う）。
+  //
+  // closedAt を持たないものを末尾へ回し、決め手が無いときは着手日（byNewest）で
+  // 並べて描画順を安定させる ―― ArchivedGoal.byNewest が Timestamp で行っていた
+  // 判断を、'YYYY-MM-DD' の文字列比較に置き換えたもの（辞書順と時系列順が一致する）。
+  static int byClosedDesc(Goal a, Goal b) {
+    if (a.closedAt.isEmpty != b.closedAt.isEmpty) {
+      return a.closedAt.isEmpty ? 1 : -1;
+    }
+    final byDate = b.closedAt.compareTo(a.closedAt);
+    return byDate != 0 ? byDate : byNewest(a, b);
+  }
+
   // 回答キー → 行動項目のラベル。
   // 保存された回答（goal_<uuid>）を人が読める形に戻すために使う。
   // 日記生成へ渡すときにこれを通さないと、カスタム質問の回答が
   // 「カスタム: はい」としか渡らない現状と同じことになる。
   Map<String, String> answerLabels() => {
     for (final action in actions) action.answerKey: action.label,
+  };
+
+  // 回答キー → 目標名を添えたラベル。
+  // 別々の目標に同じ「体重」があるとき、項目名だけではどちらの記録か区別が
+  // 付かないため（回答キーは uuid なので衝突しないが、ラベルは衝突する）。
+  // 回答を AI へ渡す側（日記生成・分析室の所見）はこちらを使う。
+  Map<String, String> qualifiedAnswerLabels() => {
+    for (final entry in answerLabels().entries)
+      entry.key: '目標「$title」の「${entry.value}」',
   };
 
   // 数値で記録する行動項目だけを取り出す（分析室のカード分けに使う）
@@ -354,34 +422,6 @@ class Goal {
       lines.addAll(actions.map((a) => '  ${a.promptLine()}'));
     }
     return lines.join('\n');
-  }
-}
-
-// ──────────────────────────────────────────────────────────────
-// 追跡を終えた目標1件
-//
-// goal-archive のドキュメントを読んだ結果。Timestamp を DateTime に直すのは
-// 読み出し側（FirestoreService）の仕事で、このファイルは cloud_firestore に依存しない
-// ―― モデルを Firestore 無しでテストできる状態に保つため。
-// ──────────────────────────────────────────────────────────────
-class ArchivedGoal {
-  final Goal goal;
-  final GoalOutcome? outcome; // 読み取れない・記録の無いものは null
-  final DateTime? archivedAt;
-
-  const ArchivedGoal({required this.goal, this.outcome, this.archivedAt});
-
-  // 退避が新しいものが上に来る並び順。archivedAt を持たないものは末尾へ回し、
-  // 決め手が無いときは着手日（Goal.byNewest）で並べて描画順を安定させる。
-  static int byNewest(ArchivedGoal a, ArchivedGoal b) {
-    final at = a.archivedAt;
-    final bt = b.archivedAt;
-    if (at == null || bt == null) {
-      if (at == bt) return Goal.byNewest(a.goal, b.goal);
-      return at == null ? 1 : -1;
-    }
-    final byTime = bt.compareTo(at);
-    return byTime != 0 ? byTime : Goal.byNewest(a.goal, b.goal);
   }
 }
 
@@ -427,8 +467,11 @@ int selectableActionSlots(Iterable<Goal> goals, {String? excludingGoalId}) {
 // 旧スキーマからの移行
 // ──────────────────────────────────────────────────────────────
 
-// goals コレクションから読んだ (ドキュメントID, データ) を、そのまま使える目標と、
-// 旧スキーマ goals/current から拾った目標に振り分ける。
+// goals コレクションから読んだ (ドキュメントID, データ) を、追跡中のもの・追跡を
+// 終えたもの・旧スキーマ goals/current から拾ったものに振り分ける。
+//
+// 追跡を終えたものが同じコレクションに混ざるようになったのは、goal-archive へ
+// ドキュメントを移すのをやめたため（配下の記録が付いていかないので。GoalStatus の説明参照）。
 //
 // Firestore を起動せずテストで固められるよう純関数にしている
 // （fake_cloud_firestore を入れていないので、切り出さないと検証手段が無い）。
@@ -436,12 +479,16 @@ int selectableActionSlots(Iterable<Goal> goals, {String? excludingGoalId}) {
 //
 // タイトルの無い目標を捨てるのは、空のドキュメントが kMaxTrackedGoals の枠を
 // ひとつ食って「もう立てられない」状態を作らないため。
-({List<Goal> goals, Goal? legacy}) partitionGoalDocs(
+//
+// 旧 goals/current は status を持たないので必ず追跡中として扱われる（当時は
+// 追跡中の1件しか置かない場所だったので、それが正しい読み替えになる）。
+({List<Goal> active, List<Goal> closed, Goal? legacy}) partitionGoalDocs(
   Iterable<MapEntry<String, Map<String, dynamic>>> docs, {
   String Function()? newId,
 }) {
   final issue = newId ?? () => const Uuid().v4();
-  final goals = <Goal>[];
+  final active = <Goal>[];
+  final closed = <Goal>[];
   Goal? legacy;
 
   for (final doc in docs) {
@@ -453,10 +500,11 @@ int selectableActionSlots(Iterable<Goal> goals, {String? excludingGoalId}) {
       continue;
     }
     // id が欠けていてもドキュメントIDで補える（保存時に必ず一致させているため）
-    goals.add(goal.id.isEmpty ? goal.copyWith(id: doc.key) : goal);
+    final filled = goal.id.isEmpty ? goal.copyWith(id: doc.key) : goal;
+    (filled.isActive ? active : closed).add(filled);
   }
 
-  return (goals: goals, legacy: legacy);
+  return (active: active, closed: closed, legacy: legacy);
 }
 
 // 見立て直した目標の行動項目に、見直す前と同じものがあれば元の id を引き継ぐ。
@@ -495,3 +543,63 @@ Goal carryOverActionIds(Goal draft, Goal? previous) {
 // 引き継ぎの一致判定に使うキー。ラベルに現れない NUL で型と繋ぐ。
 String _carryKey(GoalAction action) =>
     '${goalActionTypeTo(action.type)}\u0000${action.label}';
+
+// その日付の記録で行動項目を聞くべき目標だけを返す。
+//
+// 過去の日付を作り直すとき、着手より前の日にまで項目を聞くと、まだ追って
+// いなかった日が分析室の達成率の母数に入ってしまう
+// （checkRate は「答えた日だけを母数にする」数え方をしている）。
+//
+// createdAt を持たない古い目標は落とさない ―― 着手日が分からないだけで、
+// その日は追っていなかった、とまでは言えないため。
+// dateKey には 'YYYY-MM-DD' を渡す（辞書順と時系列順が一致する）。
+List<Goal> goalsTrackedOn(Iterable<Goal> goals, String dateKey) => [
+  for (final goal in goals)
+    if (goal.createdAt.isEmpty || goal.createdAt.compareTo(dateKey) <= 0) goal,
+];
+
+// 旧 goal-archive のドキュメントを、status を持つ Goal として読み替える。
+//
+// closedAt は呼び出し側が Timestamp から 'YYYY-MM-DD' へ直して渡す
+// （このファイルを cloud_firestore に依存させないため。記録が無ければ空文字）。
+// id が空のものをドキュメントIDで補うのは、追跡中が1件だけだった頃のデータが
+// id を持たないことがあるため（partitionGoalDocs と同じ手当て）。
+Goal goalFromArchiveDoc(
+  String docId,
+  Map<String, dynamic> data, {
+  required String closedAt,
+}) {
+  final goal = Goal.fromMap(data);
+  return goal.copyWith(
+    id: goal.id.isEmpty ? docId : goal.id,
+    status: goalStatusFromLegacyOutcome(data['outcome'] as String?),
+    closedAt: closedAt,
+  );
+}
+
+// その日に聞く質問を、目標をまたいで1本の列にする。
+//
+// 目標の並び（新しい順）のまま、各目標の項目を定義順に並べる。全体で max 件まで。
+// 目標が何件あっても毎日の質問がそれに比例して増えないようにするための上限で、
+// 件数が記録を続けられるかどうかを決める（kMaxTotalGoalActions の趣旨）。
+//
+// 上限は相談室で守っているが、上限を入れる前のデータで溢れていても尋問は長くしない。
+// 溢れた場合は後ろ（＝古い目標）の質問から落ちる。
+//
+// 画面から切り出して純関数にしているのは、Firestore を起動せずに
+// 「目標の順 × 項目の順」と切り詰めを検証できるようにするため
+// （画面に埋めたままだと、順序の取り違えに気づく手段が目視しか無くなる）。
+List<({Goal goal, GoalAction action})> buildGoalQuestionQueue(
+  Iterable<Goal> goals, {
+  int max = kMaxTotalGoalActions,
+}) {
+  final queue = <({Goal goal, GoalAction action})>[];
+  if (max <= 0) return queue;
+  for (final goal in goals) {
+    for (final action in goal.actions) {
+      queue.add((goal: goal, action: action));
+      if (queue.length >= max) return queue;
+    }
+  }
+  return queue;
+}

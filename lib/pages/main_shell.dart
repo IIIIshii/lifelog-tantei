@@ -5,6 +5,7 @@ import 'analytics_page.dart';
 import 'consult_hub_page.dart';
 import 'diary_list_page.dart';
 import 'diary_page.dart';
+import 'goal_check_in_page.dart';
 import 'home_page.dart';
 import 'settings_page.dart';
 
@@ -32,6 +33,7 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   static const int _homeIndex = 0;
   static const int _consultIndex = 2;
+  static const int _settingsIndex = 4;
   static const int _tabCount = 5;
 
   late final String _uid;
@@ -51,12 +53,22 @@ class _MainShellState extends State<MainShell> {
 
   // 相談室ハブの再読込シグナル。_homeRefresh と同じ理由で要る
   // （尋問で目標の項目に答えると「本日記録済み」の表示が変わる）。
-  // 2つをまとめて Map で持たないのは、どのタブが再読込を要るのかが
+  // まとめて Map で持たないのは、どのタブが再読込を要るのかが
   // 読み取れなくなるため。
   final ValueNotifier<int> _consultRefresh = ValueNotifier<int>(0);
 
+  // 設定の再読込シグナル。相談室で独自質問が増えるため、開くたびに読み直す。
+  // saveUserSettings が .set() の全置換なので、古い設定を握ったままトグルを
+  // 触ると、その間に増えた質問を巻き戻してしまう。
+  final ValueNotifier<int> _settingsRefresh = ValueNotifier<int>(0);
+
   // 今日の記録有無。HomePage が読み込み結果を書き込み、FAB のラベルに反映する。
   final ValueNotifier<bool?> _todayDone = ValueNotifier<bool?>(null);
+
+  // 今日聞くべき目標があるか。これも HomePage が書き込む（_todayDone と同じ流儀）。
+  // FAB のためだけに Firestore をもう一度読まないため、既に目標を読んでいる
+  // ホームの結果を借りる。
+  final ValueNotifier<bool> _hasGoals = ValueNotifier<bool>(false);
 
   @override
   void initState() {
@@ -69,7 +81,9 @@ class _MainShellState extends State<MainShell> {
   void dispose() {
     _homeRefresh.dispose();
     _consultRefresh.dispose();
+    _settingsRefresh.dispose();
     _todayDone.dispose();
+    _hasGoals.dispose();
     super.dispose();
   }
 
@@ -82,16 +96,42 @@ class _MainShellState extends State<MainShell> {
     });
     // 事務所タブに戻ってきたタイミングで最新の状態を取り直す
     if (i == _homeIndex) _bumpHomeRefresh();
-    // 相談室も同じ理由で取り直す
+    // 相談室と設定も同じ理由で取り直す
     if (i == _consultIndex) _consultRefresh.value++;
+    if (i == _settingsIndex) _settingsRefresh.value++;
   }
 
-  // 主要動線。記録が終わって戻ってきたらホームを更新する。
-  void _openDiary() {
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(builder: (_) => const DiaryPage()),
-    ).then((_) => _bumpHomeRefresh());
+  // 主要動線。追跡中の事件があれば、日記の捜査より先に目標の報告を聞く。
+  //
+  // 日記と目標は別の記録なので画面も分けている。報告画面は pop の戻り値で
+  // 「このまま捜査へ進むか」を返し、ここがその先を決める。
+  //
+  // pushReplacement で日記へ差し替えないのは、置き換えると元ルートの future が
+  // その場で完了し、日記を書き終える前に下の refresh が走ってしまうため。
+  //
+  // 目標が0件のときは報告画面を開かない（空の画面が一瞬挟まるのを避ける）。
+  Future<void> _openDiary() async {
+    if (_hasGoals.value) {
+      final toDiary = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute<bool>(builder: (_) => GoalCheckInPage(uid: _uid)),
+      );
+      if (toDiary == true && mounted) {
+        await Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(builder: (_) => const DiaryPage()),
+        );
+      }
+    } else {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute<void>(builder: (_) => const DiaryPage()),
+      );
+    }
+    if (!mounted) return;
+    _bumpHomeRefresh();
+    // 目標の報告が入ると相談室の「本日記録済み」も変わる
+    _consultRefresh.value++;
   }
 
   Widget _buildTab(int i) {
@@ -101,7 +141,11 @@ class _MainShellState extends State<MainShell> {
           uid: _uid,
           refreshSignal: _homeRefresh,
           todayDone: _todayDone,
+          hasGoals: _hasGoals,
           onOpenConsultTab: () => _selectTab(_consultIndex),
+          // 本日の事件カードからの入り口も FAB と同じ動線にする。
+          // 分けたままだと「カードから入ると目標を聞かれない」という差が残る。
+          onOpenDiary: _openDiary,
         );
       case 1:
         return DiaryListPage(uid: _uid);
@@ -110,7 +154,7 @@ class _MainShellState extends State<MainShell> {
       case 3:
         return const AnalyticsPage();
       default:
-        return const SettingsPage();
+        return SettingsPage(refreshSignal: _settingsRefresh);
     }
   }
 
