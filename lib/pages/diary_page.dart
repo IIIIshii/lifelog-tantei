@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../core/question_schedule.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/user_settings.dart';
@@ -362,7 +363,10 @@ class _DiaryPageState extends State<DiaryPage> {
     // 質問文は回答キーと対にして控えておく。キューは尋問で消費されてしまうので、
     // 日記生成へ「何を尋ねた答えか」を渡すにはここで別に持つ必要がある。
     _customQuestionLabels.clear(); // 「いちから作り直す」で再実行されるため積み直す
+    // 出題曜日に今日が含まれない質問は飛ばす
+    final now = DateTime.now();
     for (final question in settings.customQuestions) {
+      if (!isAskedOn(question, now)) continue;
       _customQuestionLabels[question.answerKey] = question.text;
       _customQueue.add(_Question(question.text, key: question.answerKey));
     }
