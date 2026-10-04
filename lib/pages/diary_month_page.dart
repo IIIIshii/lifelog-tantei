@@ -68,6 +68,8 @@ class _DiaryMonthPageState extends State<DiaryMonthPage> {
 
     return Scaffold(
       backgroundColor: c.background,
+      // 読み込み中・エラー時も戻るボタンを出すため、AppBar は StreamBuilder の外に置く
+      appBar: _buildAppBar(c),
       body: StreamBuilder<Map<String, String>>(
         stream: widget.entries,
         builder: (context, snapshot) {
@@ -89,30 +91,23 @@ class _DiaryMonthPageState extends State<DiaryMonthPage> {
               ? _selected
               : latest;
 
-          return Column(
-            children: [
-              _buildAppBar(c, monthEntries.length),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      _buildCalendar(c, monthEntries, selected),
-                      KeyedSubtree(
-                        key: _previewKey,
-                        child: _buildPreview(c, monthEntries, selected),
-                      ),
-                    ],
-                  ),
+          return SingleChildScrollView(
+            child: Column(
+              children: [
+                _buildCalendar(c, monthEntries, selected),
+                KeyedSubtree(
+                  key: _previewKey,
+                  child: _buildPreview(c, monthEntries, selected),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),
     );
   }
 
-  Widget _buildAppBar(AppColors c, int count) {
+  PreferredSizeWidget _buildAppBar(AppColors c) {
     return AppBar(
       backgroundColor: c.appBarBg,
       foregroundColor: c.appBarFg,
@@ -127,7 +122,7 @@ class _DiaryMonthPageState extends State<DiaryMonthPage> {
           ),
           const SizedBox(height: 2),
           Text(
-            '― ${widget.year}年・$count件の事件 ―',
+            '― ${widget.year}年 ―',
             style: DetectiveTextStyles.appBarSubtitle(color: c.appBarSubtitle),
           ),
         ],
@@ -192,8 +187,9 @@ class _DiaryMonthPageState extends State<DiaryMonthPage> {
     Map<String, String> monthEntries,
     String? selected,
   ) {
-    if (day < 1 || day > daysInMonth)
+    if (day < 1 || day > daysInMonth) {
       return const SizedBox(height: _cellHeight);
+    }
 
     final key = dateKey(DateTime(widget.year, widget.month, day));
     final hasEntry = monthEntries.containsKey(key);

@@ -35,7 +35,55 @@ void main() {
 
     expect(find.text('二十二日の日記'), findsOneWidget);
     expect(find.text('八月の日記'), findsNothing);
-    expect(find.text('― 2026年・3件の事件 ―'), findsOneWidget);
+    expect(find.text('9月の事件簿'), findsOneWidget);
+    expect(find.text('― 2026年 ―'), findsOneWidget);
+  });
+
+  group('AppBar（戻るボタンの置き場）', () {
+    // 読み込み中・エラー時に AppBar ごと消えると、画面に戻るボタンが無くなる
+    // 本棚から push された状態を再現する（戻るボタンは「前の画面がある」ときだけ出る）。
+    // 読み込み中のスピナーは回り続けるので、pumpAndSettle は使えず pump で時間を進める
+    Future<void> pushMonthPage(
+      WidgetTester tester,
+      Stream<Map<String, String>> stream,
+    ) async {
+      final navKey = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: navKey,
+          theme: buildTheme(AppThemeName.detectiveDark),
+          home: const Scaffold(body: Text('本棚')),
+        ),
+      );
+      navKey.currentState!.push(
+        MaterialPageRoute(
+          builder: (_) => DiaryMonthPage(
+            year: 2026,
+            month: 9,
+            entries: stream,
+            onOpenDetail: (_, _) {},
+          ),
+        ),
+      );
+      // 遷移アニメーションは、1回目の pump で開始し、2回目の pump で進む
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+    }
+
+    testWidgets('読み込み中でも AppBar と戻るボタンが出る', (tester) async {
+      await pushMonthPage(tester, const Stream.empty());
+
+      expect(find.text('9月の事件簿'), findsOneWidget);
+      expect(find.byType(BackButton), findsOneWidget);
+    });
+
+    testWidgets('エラー時でも AppBar と戻るボタンが出る', (tester) async {
+      await pushMonthPage(tester, Stream.error('失敗'));
+
+      expect(find.text('エラー: 失敗'), findsOneWidget);
+      expect(find.text('9月の事件簿'), findsOneWidget);
+      expect(find.byType(BackButton), findsOneWidget);
+    });
   });
 
   testWidgets('日記のある日をタップするとプレビューが切り替わる', (tester) async {
