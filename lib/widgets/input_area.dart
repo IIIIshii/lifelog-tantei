@@ -8,8 +8,16 @@ class InputArea extends StatefulWidget {
   final TextEditingController controller;
   final void Function(String) onSubmit; // 送信時に呼ばれるコールバック
 
-  const InputArea(
-      {super.key, required this.controller, required this.onSubmit});
+  // 入力欄のヒント。既定は日記の証言取り。
+  // 相談室など「証言」ではない場面のために差し替えられるようにしてある。
+  final String hintText;
+
+  const InputArea({
+    super.key,
+    required this.controller,
+    required this.onSubmit,
+    this.hintText = '証言を入力...',
+  });
 
   @override
   State<InputArea> createState() => _InputAreaState();
@@ -40,8 +48,7 @@ class _InputAreaState extends State<InputArea> {
     final ok = await svc.startListening(
       onResult: (text) {
         // 既存テキスト末尾に認識結果を追記。カーソルを末尾に置いて編集しやすくする
-        final newText =
-            _baseText.isEmpty ? text : '$_baseText$text';
+        final newText = _baseText.isEmpty ? text : '$_baseText$text';
         widget.controller.value = TextEditingValue(
           text: newText,
           selection: TextSelection.collapsed(offset: newText.length),
@@ -54,9 +61,9 @@ class _InputAreaState extends State<InputArea> {
 
     if (!ok) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('マイクの使用が許可されていません')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('マイクの使用が許可されていません')));
       }
       return;
     }
@@ -80,20 +87,16 @@ class _InputAreaState extends State<InputArea> {
           Expanded(
             child: TextField(
               controller: widget.controller,
-              style: TextStyle(
-                fontSize: 14,
-                color: c.textPrimary,
-              ),
+              style: TextStyle(fontSize: 14, color: c.textPrimary),
               decoration: InputDecoration(
-                hintText: _isListening ? '聞き取り中...' : '証言を入力...',
-                hintStyle: TextStyle(
-                  color: c.textSecondary,
-                  fontSize: 13,
-                ),
+                hintText: _isListening ? '聞き取り中...' : widget.hintText,
+                hintStyle: TextStyle(color: c.textSecondary, fontSize: 13),
                 filled: true,
                 fillColor: c.background,
                 contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 10),
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 // 通常時: カードボーダー色
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(4),
@@ -144,12 +147,8 @@ class _InputAreaState extends State<InputArea> {
             child: Container(
               width: 44,
               height: 44,
-              decoration: BoxDecoration(
-                color: c.gold,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.arrow_forward,
-                  color: c.onAccent, size: 20),
+              decoration: BoxDecoration(color: c.gold, shape: BoxShape.circle),
+              child: Icon(Icons.arrow_forward, color: c.onAccent, size: 20),
             ),
           ),
         ],

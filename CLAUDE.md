@@ -36,20 +36,55 @@ flutter test test/widget_test.dart
 
 ## Architecture
 
-Currently a single-file Flutter app (`lib/main.dart`) with all logic in one place. The app is intended to grow into a multi-screen diary app.
+`AuthGate` → `MainShell` がルート。`MainShell` が NavigationBar の5タブ
+（事務所 / 事件簿 / 相談室 / 分析室 / 設定）を遅延 IndexedStack で束ねる。
+
+- `lib/pages/` — 画面。日記側は DiaryPage / DiaryListPage / DiaryDetailPage / DiaryEditPage、
+  目標側は ConsultHubPage（事件一覧）/ ConsultPage（見立ての壁打ち）/
+  GoalCheckInPage（毎日の報告）/ GoalLogPage・GoalLogDetailPage（記録の閲覧）
+- `lib/core/` — UI から独立した純関数（`goal_progress` / `chart_scale` / `streak` /
+  `numeric_answer` / `scroll`）とテーマ。Firestore を使わずテストできる形に保つ
+- `lib/services/` — auth / firestore / gemini / notification / speech のシングルトン
+- `lib/models/`, `lib/roles/`, `lib/prompts/`, `lib/widgets/`
+
+**日記と目標の分離:** 日記の質問フロー（DiaryPage）に目標の関心事を混ぜない。
+目標の日々の報告は GoalCheckInPage が受け、保存先も別コレクション（下記データモデル）。
+ホームの FAB は「目標の報告 → 日記の新規捜査」の順に開く。
 
 **Initialization order in `main()`:**
 1. `WidgetsFlutterBinding.ensureInitialized()` — must come first (required before any MethodChannel/platform call)
 2. `dotenv.load()` — load API keys from .env
 3. `NotificationService.instance.initialize()` — timezone + notification plugin setup
 4. `Firebase.initializeApp()`
+5. `ThemeController.instance.load()` — SharedPreferences からテーマを読む（初回フレームのちらつきを防ぐため await する）
 
 **Data model (Firestore):**
+
+日記と目標は別のコレクションに分かれている。目標にも日記と同じ形の日付エントリと
+会話記録を持たせてあり、違いは日記本文（`diary`）を持たない点だけ。
+これにより `lib/core/goal_progress.dart` の集計を両方に使える（回答キーは `goal_<actionId>`）。
+
 ```
-users/{uid}/entries/{YYYY-MM-DD}
-  - weather: string
-  - timestamp: serverTimestamp
+users/{uid}/
+├ settings/preferences                  ← UserSettings
+├ entries/{YYYY-MM-DD}                  ← 日記
+│   diary / diaryMode / answers / numericAnswers / skipped / timestamp
+│   └ conversation/{autoId}  role / text / order / timestamp
+├ analyses/latest, analyses/today        ← AI所見・今日のコメント
+├ self-analysis/profile                  ← SelfAnalysis
+└ goals/{goalId}                         ← 目標（追跡を終えても消さない）
+    id / title / metric / deadline / actions[] / suggestedQuestions[] / createdAt
+    status: 'active' | 'solved' | 'abandoned' | 'closed'
+    closedAt: 'YYYY-MM-DD'（追跡中は空文字）
+    └ entries/{YYYY-MM-DD}               ← 目標の日々の報告（diary は無い）
+        answers / numericAnswers / skipped / timestamp
+        └ conversation/{autoId}  role / text / order / timestamp
 ```
+
+遅延移行（読み取りのついでに直し、失敗しても読み込みは成功させる）:
+- 旧 `goals/current` → `goals/{goalId}`
+- 旧 `goal-archive/{goalId}` → `goals/{goalId}` に `status` / `closedAt` を付けて引き上げ
+  （`outcome` が読めないものは `status: 'closed'`）
 
 **Auth:** Anonymous auth only (`FirebaseAuth.instance.signInAnonymously()`), called on every save.
 

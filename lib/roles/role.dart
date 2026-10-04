@@ -8,6 +8,11 @@
 //   思い出し     : q_morning / q_afternoon / q_evening
 //   ナレーション : intro_start / intro_custom / confirm_include / intro_recall / intro_event /
 //                  intro_modeselect / ask_addendum
+//   再捜査       : revisit_notice
+//   相談室       : intro_consult / consult_revise / consult_rethink /
+//                  consult_saved / goal_empty
+//   目標の報告   : intro_goal_checkin / goal_checkin_switch / goal_checkin_numeric_retry /
+//                  goal_checkin_done / goal_checkin_recorded
 //
 // 注: choices（朝/昼/夜・睡眠時間など）と custom_i（ユーザー定義質問）は Role に持たせない。
 //     前者は回答データとして保存・パースされる固定値、後者はユーザー入力そのものを使うため。
@@ -16,7 +21,8 @@ class Role {
   final String key; // 'hardboiled' など。UserSettings.selectedRole と一致させる
   final String label; // 設定画面に表示する名称
   final String description; // キャラ選択画面に表示する一言紹介
-  final String interviewerInstruction; // Gemini の systemInstruction / followUp 用の人格指示
+  final String
+  interviewerInstruction; // Gemini の systemInstruction / followUp 用の人格指示
   final Map<String, String> questionTexts; // 質問・ナレーションキー → 文面
 
   // ボタン選択式の回答に対する固定リアクション文面。Gemini を呼ばずにそのまま使う。

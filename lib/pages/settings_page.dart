@@ -11,15 +11,24 @@ import '../core/theme/app_theme.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../core/theme/theme_controller.dart';
 import '../models/user_settings.dart';
+import '../roles/roles.dart';
 import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/settings_section.dart';
+import 'role_select_page.dart';
 
 // ユーザーが捜査（記録）方針を設定する画面
 // 記録項目のON/OFFとカスタム質問の管理を行う
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key});
+  /// MainShell が値を進めるたびに設定を読み直すシグナル。
+  /// タブは IndexedStack で保持され破棄されないため、相談室で独自質問が
+  /// 増えてもこの合図が無いと画面に現れない。さらに saveUserSettings は
+  /// .set() の全置換なので、古い設定を握ったままトグルを触ると
+  /// その質問を消してしまう。
+  final ValueListenable<int> refreshSignal;
+
+  const SettingsPage({super.key, required this.refreshSignal});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -40,11 +49,13 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    widget.refreshSignal.addListener(_loadSettings);
     _loadSettings();
   }
 
   @override
   void dispose() {
+    widget.refreshSignal.removeListener(_loadSettings);
     _customQuestionController.dispose();
     super.dispose();
   }
@@ -105,8 +116,10 @@ class _SettingsPageState extends State<SettingsPage> {
     final newSettings = _settings.copyWith(notificationEnabled: enabled);
     await _save(newSettings);
     if (enabled) {
-      await NotificationService.instance
-          .schedule(newSettings.notificationHour, newSettings.notificationMinute);
+      await NotificationService.instance.schedule(
+        newSettings.notificationHour,
+        newSettings.notificationMinute,
+      );
     } else {
       await NotificationService.instance.cancel();
     }
@@ -122,10 +135,12 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
     if (picked == null) return;
-    await _save(_settings.copyWith(
-      notificationHour: picked.hour,
-      notificationMinute: picked.minute,
-    ));
+    await _save(
+      _settings.copyWith(
+        notificationHour: picked.hour,
+        notificationMinute: picked.minute,
+      ),
+    );
     if (_settings.notificationEnabled) {
       await NotificationService.instance.schedule(picked.hour, picked.minute);
     }
@@ -137,12 +152,18 @@ class _SettingsPageState extends State<SettingsPage> {
     final text = _customQuestionController.text.trim();
     if (text.isEmpty) return;
     _customQuestionController.clear();
-    _save(_settings.copyWith(
-      customQuestions: [
-        ..._settings.customQuestions,
-        CustomQuestion(id: const Uuid().v4(), text: text),
-      ],
-    ));
+    _save(
+      _settings.copyWith(
+        customQuestions: [
+          ..._settings.customQuestions,
+          CustomQuestion(
+            id: const Uuid().v4(),
+            text: text,
+            source: CustomQuestionSource.self,
+          ),
+        ],
+      ),
+    );
   }
 
   // 全エントリをCSV形式に変換してシェアシートを開く
@@ -183,11 +204,13 @@ class _SettingsPageState extends State<SettingsPage> {
       // 一時ファイルに書き込んでシェアする
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/nikkinext_export.csv');
-      await file.writeAsString('\uFEFF$csv', encoding: const SystemEncoding()); // BOM付きでExcelでも文字化けしない
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'text/csv')],
-        subject: 'NikkiNext 日記エクスポート',
-      );
+      await file.writeAsString(
+        '\uFEFF$csv',
+        encoding: const SystemEncoding(),
+      ); // BOM付きでExcelでも文字化けしない
+      await Share.shareXFiles([
+        XFile(file.path, mimeType: 'text/csv'),
+      ], subject: 'NikkiNext 日記エクスポート');
     } finally {
       setState(() => _isExporting = false);
     }
@@ -200,9 +223,9 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       await _firestore.seedMockData(_uid!);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('モックデータを書き込みました')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('モックデータを書き込みました')));
       }
     } finally {
       setState(() => _isSeeding = false);
@@ -218,8 +241,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // 指定idのカスタム質問を削除して保存する
   void _removeCustomQuestion(String id) {
-    final updated =
-        _settings.customQuestions.where((q) => q.id != id).toList();
+    final updated = _settings.customQuestions.where((q) => q.id != id).toList();
     _save(_settings.copyWith(customQuestions: updated));
   }
 
@@ -292,12 +314,17 @@ class _SettingsPageState extends State<SettingsPage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('探偵事務所',
-                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
+            Text(
+              '探偵事務所',
+              style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
+            ),
             const SizedBox(height: 2),
-            Text('― 捜査方針を設定する ―',
-                style: DetectiveTextStyles.appBarSubtitle(
-                    color: c.appBarSubtitle)),
+            Text(
+              '― 捜査方針を設定する ―',
+              style: DetectiveTextStyles.appBarSubtitle(
+                color: c.appBarSubtitle,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -324,19 +351,53 @@ class _SettingsPageState extends State<SettingsPage> {
               padding: const EdgeInsets.all(20),
               children: [
                 // ── セクション: アカウント ──────────────────────
-                const SectionHeader(
-                  title: '◆ アカウント',
-                  subtitle: '現在のログイン情報',
-                ),
+                const SectionHeader(title: '◆ アカウント', subtitle: '現在のログイン情報'),
                 const SizedBox(height: 8),
                 _AccountCard(onLogout: _confirmLogout),
                 const SizedBox(height: 28),
 
-                // ── セクション1: 捜査項目 ──────────────────────
-                const SectionHeader(
-                  title: '◆ 捜査項目の選択',
-                  subtitle: '記録したい項目を追加',
+                // ── セクション: 担当探偵 ──────────────────────
+                // もとはボトムナビの1タブ。5つの枠を相談室へ譲り、
+                // 設定配下の push に戻した。設定の底ではなく先頭に近い位置へ
+                // 置くのは、直前までトップレベルにあったものを埋もれさせないため。
+                const SectionHeader(title: '◆ 担当探偵', subtitle: '尋問する探偵を指名する'),
+                const SizedBox(height: 8),
+                SettingsCard(
+                  children: [
+                    ListTile(
+                      leading: Icon(Icons.person_search, color: c.gold),
+                      title: Text(
+                        '探偵キャラクター',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: c.textPrimary,
+                        ),
+                      ),
+                      subtitle: Text(
+                        roleFor(_settings.selectedRole).label,
+                        style: TextStyle(fontSize: 12, color: c.textSecondary),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        color: c.textSecondary,
+                      ),
+                      // 戻ったら読み直す。RoleSelectPage は同じ
+                      // settings/preferences を直接書くので、ここが握っている
+                      // _settings は選び直したあと古くなる。
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const RoleSelectPage(),
+                        ),
+                      ).then((_) => _loadSettings()),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 28),
+
+                // ── セクション1: 捜査項目 ──────────────────────
+                const SectionHeader(title: '◆ 捜査項目の選択', subtitle: '記録したい項目を追加'),
                 const SizedBox(height: 8),
                 SettingsCard(
                   children: [
@@ -393,10 +454,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 const SizedBox(height: 28),
 
                 // ── セクション2: 独自質問 ──────────────────────
-                const SectionHeader(
-                  title: '◆ 独自質問リスト',
-                  subtitle: '自分だけの質問を追加',
-                ),
+                const SectionHeader(title: '◆ 独自質問リスト', subtitle: '自分だけの質問を追加'),
                 const SizedBox(height: 8),
                 SettingsCard(
                   children: [
@@ -419,6 +477,21 @@ class _SettingsPageState extends State<SettingsPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
+                                  // 相談室で加えた質問だけ出所を添える。
+                                  // 自分で書いたものに「自分で書いた」と出すのは
+                                  // 情報量が無く、出所が分からない古い質問には
+                                  // 嘘を書かないよう何も出さない。
+                                  if (question.source ==
+                                      CustomQuestionSource.consult) ...[
+                                    Text(
+                                      '相談室で加えた質問',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: c.textSecondary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                  ],
                                   Text(
                                     '出題：${describeWeekdays(question.weekdays)}',
                                     style: TextStyle(
@@ -433,14 +506,16 @@ class _SettingsPageState extends State<SettingsPage> {
                             ),
                             // 削除ボタン
                             trailing: IconButton(
-                              icon: Icon(Icons.delete_outline,
-                                  color: c.textSecondary, size: 20),
+                              icon: Icon(
+                                Icons.delete_outline,
+                                color: c.textSecondary,
+                                size: 20,
+                              ),
                               onPressed: () =>
                                   _removeCustomQuestion(question.id),
                             ),
                           ),
-                          if (entry.key <
-                              _settings.customQuestions.length - 1)
+                          if (entry.key < _settings.customQuestions.length - 1)
                             Divider(height: 1, color: c.cardBorder),
                         ],
                       );
@@ -453,7 +528,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     // 新しいカスタム質問を入力・追加するフィールド
                     Padding(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
                       child: Row(
                         children: [
                           Expanded(
@@ -489,24 +566,24 @@ class _SettingsPageState extends State<SettingsPage> {
                 // ── セクション: テーマ選択 ──────────────────────
                 // ValueListenableBuilder で ThemeController を購読し、
                 // 選択中テーマの変化でラジオボタンを再描画する
-                const SectionHeader(
-                  title: '◆ テーマ',
-                  subtitle: 'アプリの見た目を切り替える',
-                ),
+                const SectionHeader(title: '◆ テーマ', subtitle: 'アプリの見た目を切り替える'),
                 const SizedBox(height: 8),
                 ValueListenableBuilder<AppThemeName>(
                   valueListenable: ThemeController.instance.notifier,
                   builder: (context, currentTheme, _) {
                     return SettingsCard(
                       children: [
-                        for (var i = 0;
-                            i < AppThemeName.values.length;
-                            i++) ...[
+                        for (
+                          var i = 0;
+                          i < AppThemeName.values.length;
+                          i++
+                        ) ...[
                           _ThemeTile(
                             name: AppThemeName.values[i],
                             selected: currentTheme == AppThemeName.values[i],
-                            onTap: () => ThemeController.instance
-                                .setTheme(AppThemeName.values[i]),
+                            onTap: () => ThemeController.instance.setTheme(
+                              AppThemeName.values[i],
+                            ),
                           ),
                           if (i < AppThemeName.values.length - 1)
                             Divider(height: 1, color: c.cardBorder),
@@ -520,10 +597,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 // ── セクション3: データ管理 ──────────────────────
                 // デバッグビルドのみシードボタンを表示する
                 if (kDebugMode) ...[
-                  const SectionHeader(
-                    title: '◆ デバッグ',
-                    subtitle: 'デバッグビルドのみ表示',
-                  ),
+                  const SectionHeader(title: '◆ デバッグ', subtitle: 'デバッグビルドのみ表示'),
                   const SizedBox(height: 8),
                   SettingsCard(
                     children: [
@@ -553,8 +627,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : Icon(Icons.chevron_right,
-                                color: c.textSecondary),
+                            : Icon(Icons.chevron_right, color: c.textSecondary),
                         onTap: _isSeeding ? null : _seedMockData,
                       ),
                     ],
@@ -581,10 +654,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       subtitle: Text(
                         '設定した時刻に通知で日記を促します',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: c.textSecondary,
-                        ),
+                        style: TextStyle(fontSize: 12, color: c.textSecondary),
                       ),
                       value: _settings.notificationEnabled,
                       onChanged: _toggleNotification,
@@ -652,10 +722,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       subtitle: Text(
                         '全ての日記をCSVファイルとして書き出します',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: c.textSecondary,
-                        ),
+                        style: TextStyle(fontSize: 12, color: c.textSecondary),
                       ),
                       trailing: _isExporting
                           ? SizedBox(
@@ -666,8 +733,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 strokeWidth: 2,
                               ),
                             )
-                          : Icon(Icons.chevron_right,
-                              color: c.textSecondary),
+                          : Icon(Icons.chevron_right, color: c.textSecondary),
                       onTap: _isExporting ? null : _exportCsv,
                     ),
                   ],
@@ -704,8 +770,7 @@ class _ThemeTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
             // ── カラーパレットプレビュー（3色ドット） ──
@@ -732,10 +797,7 @@ class _ThemeTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     name.description,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: c.textSecondary,
-                    ),
+                    style: TextStyle(fontSize: 12, color: c.textSecondary),
                   ),
                 ],
               ),
@@ -794,8 +856,8 @@ class _AccountCard extends StatelessWidget {
     final displayName = isGuest
         ? 'ゲスト'
         : (user?.displayName?.isNotEmpty == true
-            ? user!.displayName!
-            : '名前未設定');
+              ? user!.displayName!
+              : '名前未設定');
     final subtitle = isGuest
         ? '※ 端末固有のデータです。他端末からは参照できません'
         : (user?.email ?? '');

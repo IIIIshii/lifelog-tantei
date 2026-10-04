@@ -1,5 +1,30 @@
 import 'package:uuid/uuid.dart';
 
+// 質問がどこから来たか。
+// 相談室で探偵が提案したものを設定画面で見分けられるようにするために持つ。
+enum CustomQuestionSource {
+  self, // 設定画面で自分で書いた
+  consult, // 相談室で探偵の提案を採用した
+}
+
+String customQuestionSourceTo(CustomQuestionSource source) =>
+    source == CustomQuestionSource.consult ? 'consult' : 'self';
+
+// 保存文字列 → enum。読み取れない値・記録の無いものは null を返す。
+//
+// 既定値へ倒さないのは、この項目を足す前に登録された質問がどちらだったか
+// 分からないため。'self' で埋めると「自分で書いた」と断定したことになる
+// （GoalOutcome と同じ考え方で、分からないものには印を出さない）。
+CustomQuestionSource? customQuestionSourceFrom(String? raw) {
+  if (raw == 'consult') return CustomQuestionSource.consult;
+  if (raw == 'self') return CustomQuestionSource.self;
+  return null;
+}
+
+// 日々の回答マップでの、カスタム質問由来のキーにつく接頭辞。
+// 目標の kGoalAnswerPrefix と同じ役割で、回答がどの出所の質問かを表す。
+const String kCustomAnswerPrefix = 'custom_';
+
 // カスタム質問1件を表すモデル
 // id は追加時に発行される不変の識別子で、回答の紐付けキーとして使用する
 // （並べ替え・削除・将来の質問文編集を行っても id は変わらない）
@@ -12,11 +37,18 @@ class CustomQuestion {
   // 出題する曜日。weekdays フィールドが無い旧データは全曜日（毎日）として読む
   final List<int> weekdays;
 
+  /// どこから加わった質問か。出所を持つ前に登録されたものは null。
+  final CustomQuestionSource? source;
+
   const CustomQuestion({
     required this.id,
     required this.text,
     this.weekdays = allWeekdays,
+    this.source,
   });
+
+  // 日々の回答マップでのキー。尋問・分析室・日記生成はこのキーで値を出し入れする。
+  String get answerKey => '$kCustomAnswerPrefix$id';
 
   factory CustomQuestion.fromMap(Map<String, dynamic> map) {
     final raw = (map['weekdays'] as List<dynamic>?)
@@ -30,16 +62,25 @@ class CustomQuestion {
       text: map['text'] as String? ?? '',
       // 空リストは「永久に出題されない」状態なので、毎日に戻して救済する
       weekdays: (raw == null || raw.isEmpty) ? allWeekdays : raw,
+      source: customQuestionSourceFrom(map['source'] as String?),
     );
   }
 
-  Map<String, dynamic> toMap() => {'id': id, 'text': text, 'weekdays': weekdays};
+  // 出所が分からないものはキーごと書かない。
+  // 既定値で埋めると、読み直したときに出所が判明したように見えてしまう。
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'text': text,
+    'weekdays': weekdays,
+    if (source != null) 'source': customQuestionSourceTo(source!),
+  };
 
   CustomQuestion copyWith({List<int>? weekdays}) => CustomQuestion(
-        id: id,
-        text: text,
-        weekdays: weekdays ?? this.weekdays,
-      );
+    id: id,
+    text: text,
+    weekdays: weekdays ?? this.weekdays,
+    source: source,
+  );
 }
 
 // ユーザーの記録設定を保持するモデル
@@ -85,10 +126,15 @@ class UserSettings {
       recordFood: map['recordFood'] as bool? ?? false,
       recordExercise: map['recordExercise'] as bool? ?? false,
       recordStudy: map['recordStudy'] as bool? ?? false,
-      customQuestions: (map['customQuestions'] as List<dynamic>?)
-              ?.map((e) => e is String
-                  ? CustomQuestion(id: const Uuid().v4(), text: e)
-                  : CustomQuestion.fromMap(Map<String, dynamic>.from(e as Map)))
+      customQuestions:
+          (map['customQuestions'] as List<dynamic>?)
+              ?.map(
+                (e) => e is String
+                    ? CustomQuestion(id: const Uuid().v4(), text: e)
+                    : CustomQuestion.fromMap(
+                        Map<String, dynamic>.from(e as Map),
+                      ),
+              )
               .toList() ??
           [],
       notificationEnabled: map['notificationEnabled'] as bool? ?? false,
