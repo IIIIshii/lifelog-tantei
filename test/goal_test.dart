@@ -320,6 +320,55 @@ void main() {
       expect(goal.metric, '62kg以下');
       expect(goal.deadline, '2026-12-31');
     });
+
+    // 実機で、今日が 2026-10-11 なのに「期限 2024-08-15」が見立てに載った
+    group('期限の検証', () {
+      Goal withDeadline(String deadline, {String createdAt = '2026-10-11'}) =>
+          Goal.fromAiMap({
+            'title': '5kg減らす',
+            'deadline': deadline,
+          }, createdAt: createdAt);
+
+      test('着手日より前の期限は捨てる', () {
+        expect(withDeadline('2024-08-15').deadline, '');
+      });
+
+      test('着手日と同じ日の期限は捨てる（その日のうちに終わる目標にはならない）', () {
+        expect(withDeadline('2026-10-11').deadline, '');
+      });
+
+      test('着手日より後の期限は残す', () {
+        expect(withDeadline('2026-10-12').deadline, '2026-10-12');
+        expect(withDeadline('2027-01-11').deadline, '2027-01-11');
+      });
+
+      test('書式が違うものは捨てる', () {
+        expect(withDeadline('2027/01/11').deadline, '');
+        expect(withDeadline('2027-1-11').deadline, '');
+        expect(withDeadline('3ヶ月後').deadline, '');
+        expect(withDeadline('2027-01-11T09:00:00').deadline, '');
+      });
+
+      test('存在しない日付は捨てる（DateTime が繰り上げて読むため）', () {
+        expect(withDeadline('2027-02-31').deadline, '');
+        expect(withDeadline('2027-13-01').deadline, '');
+      });
+
+      test('期限が空なら空のまま', () {
+        expect(withDeadline('').deadline, '');
+      });
+
+      test('期限を捨てても目標そのものは成立する', () {
+        final goal = withDeadline('2024-08-15');
+        expect(goal.title, '5kg減らす');
+        expect(goal.isEmpty, isFalse);
+      });
+
+      test('着手日が読めないときは、日付として正しければ残す', () {
+        expect(withDeadline('2027-01-11', createdAt: '').deadline, '2027-01-11');
+        expect(withDeadline('2027-02-31', createdAt: '').deadline, '');
+      });
+    });
   });
 
   // ── 複数目標の上限と枠 ──────────────────────────────────────

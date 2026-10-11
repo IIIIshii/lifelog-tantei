@@ -116,6 +116,33 @@ double? _toDouble(Object? raw) {
   return null;
 }
 
+// AI が返した期限のうち、使えるものだけを残す。使えなければ空文字（期限なし）。
+//
+// 検証する理由: Gemini は今日の日付を知らないうえ、書式も保証されない。
+// 実機で「期限 2024-08-15」のように過去の日付が見立てに載ったことがあり、
+// プロンプトに今日の日付を渡しても、そのまま信じて保存する作りでは再発しうる。
+// 期限は無くても目標は成立する（Goal.isEmpty は title だけで判定する）ので、
+// 疑わしいときは捨てる側に倒す。
+//
+// 捨てる条件: YYYY-MM-DD でない／存在しない日付／着手日（createdAt）以前。
+// createdAt が読めないときは、日付として正しいことだけを確かめる。
+String _validDeadline(String raw, String createdAt) {
+  if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(raw)) return '';
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return '';
+
+  // 2026-02-31 のような存在しない日付は、DateTime が翌月へ繰り上げて読む。
+  // 書き戻した文字列が元と一致するかで見分ける。
+  String two(int n) => n.toString().padLeft(2, '0');
+  final roundTrip = '${parsed.year.toString().padLeft(4, '0')}'
+      '-${two(parsed.month)}-${two(parsed.day)}';
+  if (roundTrip != raw) return '';
+
+  final created = DateTime.tryParse(createdAt);
+  if (created != null && !parsed.isAfter(created)) return '';
+  return raw;
+}
+
 // ──────────────────────────────────────────────────────────────
 // 行動項目1件
 // ──────────────────────────────────────────────────────────────
@@ -269,7 +296,10 @@ class Goal {
       id: const Uuid().v4(),
       title: (map['title'] as String?)?.trim() ?? '',
       metric: (map['metric'] as String?)?.trim() ?? '',
-      deadline: (map['deadline'] as String?)?.trim() ?? '',
+      deadline: _validDeadline(
+        (map['deadline'] as String?)?.trim() ?? '',
+        createdAt,
+      ),
       actions: actions,
       suggestedQuestions: questions,
       createdAt: createdAt,

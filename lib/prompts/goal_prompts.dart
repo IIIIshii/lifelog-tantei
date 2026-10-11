@@ -20,8 +20,20 @@ class GoalPrompts {
     String conversationHistory, {
     String targetGoalSummary = '',
     String otherGoalsSummary = '',
+    String today = '',
   }) {
     final buffer = StringBuffer();
+
+    // Gemini は今日の日付を知らない。渡さないと deadline を学習時点の感覚で
+    // 作ってしまい、過去の日付が返る（実機で 2024 年の期限が出た）。
+    // 空なら省く（他のブロックと同じ流儀）。
+    if (today.isNotEmpty) {
+      buffer
+        ..writeln('【今日の日付】')
+        ..writeln(today)
+        ..writeln('deadline は、この日付より後の日付を、ここから数えて決めてください。')
+        ..writeln();
+    }
 
     if (targetGoalSummary.isNotEmpty) {
       buffer
