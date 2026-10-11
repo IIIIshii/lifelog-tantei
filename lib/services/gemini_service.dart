@@ -347,7 +347,8 @@ class GeminiService {
   // 相談室の会話から、探偵の返答と（まとまっていれば）目標の見立てを生成させる。
   //
   // 戻り値の goal は ready が true のときだけ非 null。
-  // today には 'YYYY-MM-DD' を渡す（Goal.createdAt になる。日付の生成は呼び出し側の責務）。
+  // today には 'YYYY-MM-DD' を渡す（Goal.createdAt になり、プロンプトにも渡して
+  // 期限の基準にさせる。日付の生成は呼び出し側の責務）。
   // target は見直す対象の目標。新しく立てるときは null。
   // otherGoals は同時に追っている他の目標（同じ狙いの事件を重ねて立てさせないため）。
   // actionBudget は毎日の記録に加えられる行動項目の残り枠。
@@ -375,6 +376,7 @@ class GeminiService {
         (forcePropose ? AiInstructions.goalForceProposeHint() : '');
     final body = GoalPrompts.buildConsultPrompt(
       _buildHistory(messages),
+      today: today,
       targetGoalSummary: target?.promptSummary() ?? '',
       otherGoalsSummary: otherGoals
           .map((goal) => goal.promptHeadline())
