@@ -6,7 +6,7 @@ import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/goal.dart';
-import '../models/user_settings.dart';
+import '../models/record_field.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
@@ -21,22 +21,19 @@ import '../widgets/message_bubble.dart';
 // タブに直接置かず一覧から push するのは、IndexedStack がページを破棄しないため。
 // タブ直置きにすると前回の会話が残り続け、「どの事件の話か」も選べない。
 //
-// DiaryPage のような12状態のステートマシンにしていないのは、ここが
-// 「話す → 見立てが出る → 契約する」の一本道で、質問キューも分岐モードも無いため。
-// 「解決した / 断念した」をここに置いていないのも同じ理由で、一本道に分岐を足さない
+// ここは「話す → 見立てが出る → 契約する」の一本道。
+// 「解決した / 断念した」をここに置いていないのも、一本道に分岐を足さないため
 // （追跡をやめる操作は事件一覧の仕事）。
 //
 // 壁打ちの会話は保存しない。この画面の成果物は目標そのもの
 // （users/{uid}/goals/{goalId}）で、見立てが決まったあとに経緯を読み返す先が無いため。
 //
-// 毎日の報告（GoalCheckInPage）は逆で、会話を
-// goals/{goalId}/entries/{date}/conversation に残す。記録一覧から
-// 「その日、何を聞かれて何と答えたか」を読み返すからで、保存する／しないの違いは
-// 読み返す先があるかどうかで決めている。
+// 決まった目標の行動項目は、翌日から日々の記録（RecordSheetPage）の表に並ぶ。
+// 提案された問いは、選ぶと記録の型（settings/fields）にテキスト項目として加わる。
 enum _Stage {
   talking, // 壁打ち中
   reviewing, // AIが見立てを出した。採用するか確認している
-  saved, // 契約成立。独自質問の承認だけが残る
+  saved, // 契約成立。記録項目の提案の承認だけが残る
 }
 
 class ConsultPage extends StatefulWidget {
@@ -82,7 +79,7 @@ class _ConsultPageState extends State<ConsultPage> {
 
   Goal? _draft; // AIが提案した見立て。契約後は保存済みの目標が入る
   final Set<String> _selectedActionIds = {}; // 採用する行動項目
-  final Set<String> _acceptedQuestions = {}; // 独自質問リストへ追加済みの質問
+  final Set<String> _acceptedQuestions = {}; // 記録項目へ追加済みの問い
 
   List<String>? _currentChoices; // null ならテキスト入力を表示する
   int _animatedUpTo = 0; // タイプライター表示を流し終えた位置
@@ -106,7 +103,7 @@ class _ConsultPageState extends State<ConsultPage> {
   }
 
   // 設定・自己分析・目標を並行で読み、この相談で使う Gemini クライアントを組み立てる。
-  // 自己分析は共有トグルの判定ごと GeminiService に委ねる（DiaryPage._initGemini と同じ）。
+  // 自己分析は共有トグルの判定ごと GeminiService に委ねる（聴取と同じ）。
   Future<void> _init() async {
     try {
       final settingsFuture = _firestore.getUserSettings(widget.uid);
@@ -289,28 +286,21 @@ class _ConsultPageState extends State<ConsultPage> {
     }
   }
 
-  // 提案された独自質問を、設定の独自質問リストへ追加する。
+  // 提案された問いを、日々の記録の項目（テキスト）として加える。
   //
-  // 設定は毎回読み直してから書く。saveUserSettings は .set() の全置換なので、
-  // 相談室に入る前に読んだ設定を握ったまま書くと、その間に設定画面で変えた
-  // トグルや質問を巻き戻してしまう。
+  // addField はトランザクションで記録の型を読み直してから書く。相談室に入る前に
+  // 読んだ一覧を握ったまま書くと、その間に設定画面で変えた項目を巻き戻すため。
+  // 同じ名前の項目が既にあれば何もしない。
   Future<void> _acceptQuestion(String text) async {
     if (_acceptedQuestions.contains(text)) return;
     setState(() => _acceptedQuestions.add(text));
     try {
-      final settings = await _firestore.getUserSettings(widget.uid);
-      if (settings.customQuestions.any((q) => q.text == text)) return;
-      await _firestore.saveUserSettings(
+      await _firestore.addField(
         widget.uid,
-        settings.copyWith(
-          customQuestions: [
-            ...settings.customQuestions,
-            CustomQuestion(
-              id: const Uuid().v4(),
-              text: text,
-              source: CustomQuestionSource.consult,
-            ),
-          ],
+        RecordField(
+          id: '$kCustomFieldPrefix${const Uuid().v4()}',
+          label: text,
+          source: FieldSource.consult,
         ),
       );
     } catch (e) {
@@ -369,7 +359,7 @@ class _ConsultPageState extends State<ConsultPage> {
     final c = context.colors;
 
     // タイプ中の吹き出しは1件だけ。流し終えるまでは回答させない
-    // （DiaryPage と同じ表示制御。読み終える前に選択肢が出ると急かされて見える）
+    // （聴取と同じ表示制御。読み終える前に選択肢が出ると急かされて見える）
     int? typingIndex;
     for (var i = _animatedUpTo; i < _messages.length; i++) {
       if (_messages[i]['role'] == 'ai') {
@@ -503,7 +493,7 @@ class _ConsultPageState extends State<ConsultPage> {
     );
   }
 
-  // 会話の末尾に出す、見立てカード＋（契約後は）独自質問の提案。
+  // 会話の末尾に出す、見立てカード＋（契約後は）記録項目の提案。
   Widget _buildDraftSection() {
     final draft = _draft!;
     return Padding(
@@ -745,10 +735,10 @@ class _ActionRow extends StatelessWidget {
 }
 
 // ──────────────────────────────────────────────────────────────
-// 独自質問の提案カード
+// 記録項目の提案カード
 //
-// 契約が成立したあとに出す。タップした質問は設定の「独自質問リスト」へ入り、
-// 翌日からの捜査で聞かれるようになる。
+// 契約が成立したあとに出す。タップした問いは記録の型（テキスト項目）に入り、
+// 日々の記録の表に並ぶようになる。
 // 行動項目（毎日の計測）と混同されやすいので、別カードに分けて説明を添える。
 // ──────────────────────────────────────────────────────────────
 class _QuestionProposalCard extends StatelessWidget {
@@ -780,7 +770,7 @@ class _QuestionProposalCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '◆ 尋問に加える質問',
+                  '◆ 日々の記録に加える問い',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
@@ -790,7 +780,7 @@ class _QuestionProposalCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '数字では拾えないことを聞く問い。選ぶと独自質問リストに入る',
+                  '数字では拾えないことを書き留める問い。選ぶと記録の表に加わる',
                   style: TextStyle(fontSize: 11, color: c.textSecondary),
                 ),
               ],

@@ -4,8 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:uuid/uuid.dart';
-import '../core/question_schedule.dart';
+import '../core/daily_record.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/detective_text_styles.dart';
@@ -16,16 +15,16 @@ import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/settings_section.dart';
+import 'field_settings_page.dart';
 import 'role_select_page.dart';
 
-// ユーザーが捜査（記録）方針を設定する画面
-// 記録項目のON/OFFとカスタム質問の管理を行う
+// 設定画面。担当探偵・記録する項目・テーマ・通知・データ管理をまとめる。
+// 記録する項目の中身は FieldSettingsPage（push）で編集する。
 class SettingsPage extends StatefulWidget {
   /// MainShell が値を進めるたびに設定を読み直すシグナル。
-  /// タブは IndexedStack で保持され破棄されないため、相談室で独自質問が
-  /// 増えてもこの合図が無いと画面に現れない。さらに saveUserSettings は
-  /// .set() の全置換なので、古い設定を握ったままトグルを触ると
-  /// その質問を消してしまう。
+  /// タブは IndexedStack で保持され破棄されないため、探偵の指名をホームから
+  /// 変えてもこの合図が無いと画面に現れない。さらに saveUserSettings は
+  /// .set() の全置換なので、古い設定を握ったまま通知を触ると指名を巻き戻してしまう。
   final ValueListenable<int> refreshSignal;
 
   const SettingsPage({super.key, required this.refreshSignal});
@@ -43,8 +42,6 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _isSeeding = false;
 
   final FirestoreService _firestore = FirestoreService();
-  final TextEditingController _customQuestionController =
-      TextEditingController();
 
   @override
   void initState() {
@@ -56,7 +53,6 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     widget.refreshSignal.removeListener(_loadSettings);
-    _customQuestionController.dispose();
     super.dispose();
   }
 
@@ -146,57 +142,48 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // テキストフィールドの内容をカスタム質問リストに追加して保存する
-  // 追加時に不変idを発行し、以後の回答保存・表示紐付けのキーとして使う
-  void _addCustomQuestion() {
-    final text = _customQuestionController.text.trim();
-    if (text.isEmpty) return;
-    _customQuestionController.clear();
-    _save(
-      _settings.copyWith(
-        customQuestions: [
-          ..._settings.customQuestions,
-          CustomQuestion(
-            id: const Uuid().v4(),
-            text: text,
-            source: CustomQuestionSource.self,
-          ),
-        ],
-      ),
+  // 記録する項目の設定を開く
+  void _openFieldSettings() {
+    if (_uid == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => FieldSettingsPage(uid: _uid!)),
     );
   }
 
-  // 全エントリをCSV形式に変換してシェアシートを開く
+  // 日々の記録と日記をCSV形式に変換してシェアシートを開く。
+  // 1行が1日で、列は「日付・日記・記録の各項目」。
   Future<void> _exportCsv() async {
     if (_uid == null) return;
     setState(() => _isExporting = true);
     try {
-      final entries = await _firestore.getAllEntries(_uid!);
+      final recordsFuture = _firestore.getAllRecords(_uid!);
+      final diariesFuture = _firestore.getAllDiaries(_uid!);
+      final fieldsFuture = _firestore.getFields(_uid!);
+      final goalsFuture = _firestore.getAllGoals(_uid!);
+      final records = await recordsFuture;
+      final diaries = await diariesFuture;
+      final fields = await fieldsFuture;
+      final goals = await goalsFuture;
 
-      // 全エントリに含まれるanswerキーを収集してCSVの列を決定する
-      final allAnswerKeys = <String>{};
-      for (final entry in entries) {
-        final answers = entry.value['answers'] as Map<String, dynamic>?;
-        if (answers != null) allAnswerKeys.addAll(answers.keys);
-      }
-      final answerKeys = allAnswerKeys.toList()..sort();
-
-      // ヘッダー行
-      final rows = <List<String>>[
-        ['日付', '日記', ...answerKeys],
+      // 使わなくなった項目・閉じた目標の項目も、過去の値があれば列にする
+      final index = fieldIndex(fields, [...goals.active, ...goals.closed]);
+      final days = mergeDays(records, diaries).reversed.toList(); // 新しい順
+      final columns = [
+        for (final field in index.values)
+          if (days.any((d) => valueOf(d.value, field.id) != null)) field,
       ];
 
-      // データ行
-      for (final entry in entries) {
-        final date = entry.key;
-        final diary = (entry.value['diary'] as String?) ?? '';
-        final answers = (entry.value['answers'] as Map<String, dynamic>?) ?? {};
-        rows.add([
-          date,
-          diary,
-          ...answerKeys.map((k) => (answers[k] as String?) ?? ''),
-        ]);
-      }
+      final rows = <List<String>>[
+        ['日付', '日記', for (final field in columns) field.promptLabel],
+        for (final day in days)
+          [
+            day.key,
+            (day.value['diary'] as String?) ?? '',
+            for (final field in columns)
+              formatValue(field, valueOf(day.value, field.id)) ?? '',
+          ],
+      ];
 
       // CSV文字列に変換（カンマ・改行・ダブルクォートを含む値はクォートで囲む）
       final csv = rows.map((row) => row.map(_escapeCsv).join(',')).join('\n');
@@ -237,65 +224,6 @@ class _SettingsPageState extends State<SettingsPage> {
       return '"${value.replaceAll('"', '""')}"';
     }
     return value;
-  }
-
-  // 指定idのカスタム質問を削除して保存する
-  void _removeCustomQuestion(String id) {
-    final updated = _settings.customQuestions.where((q) => q.id != id).toList();
-    _save(_settings.copyWith(customQuestions: updated));
-  }
-
-  // 指定idのカスタム質問の出題曜日を1つオン/オフして保存する
-  // 最後の1曜日はオフにできない（toggleWeekday が元のリストを返す）
-  void _toggleQuestionWeekday(String id, int weekday) {
-    final updated = _settings.customQuestions.map((q) {
-      if (q.id != id) return q;
-      return q.copyWith(weekdays: toggleWeekday(q.weekdays, weekday));
-    }).toList();
-    _save(_settings.copyWith(customQuestions: updated));
-  }
-
-  // 月〜日の曜日トグル。選択中は gold の塗り＋onAccent の文字
-  Widget _buildWeekdayToggles(CustomQuestion question, AppColors c) {
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      children: List.generate(7, (i) {
-        final weekday = i + 1;
-        final selected = question.weekdays.contains(weekday);
-        return Semantics(
-          button: true,
-          selected: selected,
-          label: '${kWeekdayLabels[i]}曜日',
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: () => _toggleQuestionWeekday(question.id, weekday),
-            child: Container(
-              width: 32,
-              height: 32,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected ? c.gold : Colors.transparent,
-                border: Border.all(
-                  color: selected ? c.gold : c.cardBorder,
-                ),
-              ),
-              child: ExcludeSemantics(
-                child: Text(
-                  kWeekdayLabels[i],
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                    color: selected ? c.onAccent : c.textSecondary,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      }),
-    );
   }
 
   @override
@@ -396,168 +324,32 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 28),
 
-                // ── セクション1: 捜査項目 ──────────────────────
-                const SectionHeader(title: '◆ 捜査項目の選択', subtitle: '記録したい項目を追加'),
+                // ── セクション: 記録する項目 ──────────────────
+                // 日々の記録の表に並べる項目（睡眠時間・気分・自分で足した項目など）。
+                // 項目が増えると1画面に収まらないので、中身は別ページで編集する。
+                const SectionHeader(title: '◆ 記録する項目', subtitle: '日々の記録の表に並べるもの'),
                 const SizedBox(height: 8),
                 SettingsCard(
                   children: [
-                    // 「その日の印象的なイベント」は必須項目のため常にON・変更不可
-                    const SettingsSwitchTile(
-                      title: 'その日の印象的なイベント',
-                      subtitle: '今日の出来事についてAIが質問します（必須）',
-                      value: true,
-                      onChanged: null,
-                    ),
-                    Divider(height: 1, color: c.cardBorder),
-                    SettingsSwitchTile(
-                      title: '思い出しアシスト',
-                      subtitle: '午前・午後・夜に何をしたか追加で聞きます',
-                      value: _settings.recallAssist,
-                      onChanged: (v) =>
-                          _save(_settings.copyWith(recallAssist: v)),
-                    ),
-                    Divider(height: 1, color: c.cardBorder),
-                    SettingsSwitchTile(
-                      title: '睡眠時間',
-                      subtitle: '昨夜の睡眠について記録します',
-                      value: _settings.recordSleep,
-                      onChanged: (v) =>
-                          _save(_settings.copyWith(recordSleep: v)),
-                    ),
-                    Divider(height: 1, color: c.cardBorder),
-                    SettingsSwitchTile(
-                      title: '食べたもの',
-                      subtitle: '今日の食事について記録します',
-                      value: _settings.recordFood,
-                      onChanged: (v) =>
-                          _save(_settings.copyWith(recordFood: v)),
-                    ),
-                    Divider(height: 1, color: c.cardBorder),
-                    SettingsSwitchTile(
-                      title: '運動習慣',
-                      subtitle: '今日の運動について記録します',
-                      value: _settings.recordExercise,
-                      onChanged: (v) =>
-                          _save(_settings.copyWith(recordExercise: v)),
-                    ),
-                    Divider(height: 1, color: c.cardBorder),
-                    SettingsSwitchTile(
-                      title: '勉強内容',
-                      subtitle: '今日の勉強について記録します',
-                      value: _settings.recordStudy,
-                      onChanged: (v) =>
-                          _save(_settings.copyWith(recordStudy: v)),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 28),
-
-                // ── セクション2: 独自質問 ──────────────────────
-                const SectionHeader(title: '◆ 独自質問リスト', subtitle: '自分だけの質問を追加'),
-                const SizedBox(height: 8),
-                SettingsCard(
-                  children: [
-                    // 登録済みカスタム質問を一覧表示する
-                    ..._settings.customQuestions.asMap().entries.map((entry) {
-                      final question = entry.value;
-                      return Column(
-                        children: [
-                          ListTile(
-                            title: Text(
-                              question.text,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: c.textPrimary,
-                              ),
-                            ),
-                            // 出題頻度（曜日）の要約とトグル
-                            subtitle: Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // 相談室で加えた質問だけ出所を添える。
-                                  // 自分で書いたものに「自分で書いた」と出すのは
-                                  // 情報量が無く、出所が分からない古い質問には
-                                  // 嘘を書かないよう何も出さない。
-                                  if (question.source ==
-                                      CustomQuestionSource.consult) ...[
-                                    Text(
-                                      '相談室で加えた質問',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: c.textSecondary,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                  ],
-                                  Text(
-                                    '出題：${describeWeekdays(question.weekdays)}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: c.textSecondary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  _buildWeekdayToggles(question, c),
-                                ],
-                              ),
-                            ),
-                            // 削除ボタン
-                            trailing: IconButton(
-                              icon: Icon(
-                                Icons.delete_outline,
-                                color: c.textSecondary,
-                                size: 20,
-                              ),
-                              onPressed: () =>
-                                  _removeCustomQuestion(question.id),
-                            ),
-                          ),
-                          if (entry.key < _settings.customQuestions.length - 1)
-                            Divider(height: 1, color: c.cardBorder),
-                        ],
-                      );
-                    }),
-
-                    // 既存質問がある場合は区切り線を入れる
-                    if (_settings.customQuestions.isNotEmpty)
-                      Divider(height: 1, color: c.cardBorder),
-
-                    // 新しいカスタム質問を入力・追加するフィールド
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
+                    ListTile(
+                      leading: Icon(Icons.fact_check_outlined, color: c.gold),
+                      title: Text(
+                        '記録する項目を編集',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: c.textPrimary,
+                        ),
                       ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _customQuestionController,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: c.textPrimary,
-                              ),
-                              decoration: InputDecoration(
-                                hintText: '質問を追加（例：今日の天気は？）',
-                                hintStyle: TextStyle(
-                                  color: c.textSecondary,
-                                  fontSize: 13,
-                                ),
-                                border: InputBorder.none,
-                              ),
-                              onSubmitted: (_) => _addCustomQuestion(),
-                            ),
-                          ),
-                          // 追加ボタン（ゴールドアイコン）
-                          IconButton(
-                            icon: Icon(Icons.add_circle, color: c.gold),
-                            onPressed: _addCustomQuestion,
-                          ),
-                        ],
+                      subtitle: Text(
+                        '項目の追加・並べ替え・曜日・日記に使うか',
+                        style: TextStyle(fontSize: 12, color: c.textSecondary),
                       ),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        color: c.textSecondary,
+                      ),
+                      onTap: _openFieldSettings,
                     ),
                   ],
                 ),
@@ -612,7 +404,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                         ),
                         subtitle: Text(
-                          '直近14日分のサンプル日記を上書き保存します',
+                          '直近14日分のサンプルの記録と日記を上書き保存します',
                           style: TextStyle(
                             fontSize: 12,
                             color: c.textSecondary,
@@ -705,7 +497,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 // ── セクション: エクスポート ──────────────────────
                 const SectionHeader(
                   title: '◆ データ管理',
-                  subtitle: '日記データをCSVファイルでエクスポート',
+                  subtitle: '記録と日記をCSVファイルでエクスポート',
                 ),
                 const SizedBox(height: 8),
                 SettingsCard(
@@ -721,7 +513,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ),
                       subtitle: Text(
-                        '全ての日記をCSVファイルとして書き出します',
+                        '全ての日々の記録と日記をCSVファイルとして書き出します',
                         style: TextStyle(fontSize: 12, color: c.textSecondary),
                       ),
                       trailing: _isExporting

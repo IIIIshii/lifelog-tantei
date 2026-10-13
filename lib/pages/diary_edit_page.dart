@@ -2,20 +2,24 @@ import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../services/firestore_service.dart';
-import 'diary_list_page.dart';
 
-// テキスト入力で日記を書く・編集するページ
-// initialDiary が null のときは新規入力、非null のときは編集モード
+// テキスト入力で日記を書く・編集するページ。
+// initialDiary が null のときは新規入力、非null のときは編集モード。
+//
+// 保存したら pop(true) で戻る。呼び出し側（聴取・詳細画面）はそれを見て
+// 画面を閉じるか、本文を読み直すかを決める。
 class DiaryEditPage extends StatefulWidget {
   final String uid;
-  final String today;
+
+  /// 対象の日付（YYYY-MM-DD）
+  final String date;
   final FirestoreService firestore;
   final String? initialDiary;
 
   const DiaryEditPage({
     super.key,
     required this.uid,
-    required this.today,
+    required this.date,
     required this.firestore,
     this.initialDiary,
   });
@@ -27,7 +31,6 @@ class DiaryEditPage extends StatefulWidget {
 class _DiaryEditPageState extends State<DiaryEditPage> {
   late final TextEditingController _controller;
   bool _isSaving = false;
-  bool _saved = false;
 
   @override
   void initState() {
@@ -46,26 +49,35 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
     if (text.isEmpty) return;
     setState(() => _isSaving = true);
     try {
-      await widget.firestore.saveDiary(widget.uid, widget.today, text);
-      setState(() => _saved = true);
+      await widget.firestore.saveDiary(
+        widget.uid,
+        widget.date,
+        text: text,
+        // 新しく書いたときだけ作り方を残す。聴取でまとめたものを直したときは
+        // 出来事の記録（topics）と作り方をそのまま残す。
+        mode: widget.initialDiary == null ? 'manual' : null,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('事件簿に綴じておいた')));
+      Navigator.pop(context, true);
     } catch (e) {
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('エラー'),
-            content: Text('$e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      }
-    } finally {
+      if (!mounted) return;
       setState(() => _isSaving = false);
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('エラー'),
+          content: Text('$e'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
     }
   }
 
@@ -84,81 +96,24 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(isEdit ? '事件簿を編集' : '事件簿を入力',
-                style: DetectiveTextStyles.appBarTitle(color: c.appBarFg)),
+            Text(
+              isEdit ? '事件簿を編集' : '事件簿を入力',
+              style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
+            ),
             const SizedBox(height: 2),
-            Text(isEdit ? '― 記録を修正する ―' : '― 自分で記録する ―',
-                style: DetectiveTextStyles.appBarSubtitle(
-                    color: c.appBarSubtitle)),
+            Text(
+              isEdit ? '― 記録を修正する ―' : '― 自分で記録する ―',
+              style: DetectiveTextStyles.appBarSubtitle(
+                color: c.appBarSubtitle,
+              ),
+            ),
           ],
         ),
       ),
-      body: _saved ? _buildSavedView(c) : _buildEditorView(isEdit, c),
+      body: _buildEditorView(isEdit, c),
     );
   }
 
-  // 保存完了後の画面
-  Widget _buildSavedView(AppColors c) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.check_circle_outline, color: c.gold, size: 64),
-          const SizedBox(height: 16),
-          Text(
-            'お疲れ様でした。\n記録した日記は事件簿アーカイブから確認できます。',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                fontSize: 16, color: c.textPrimary, height: 1.6),
-          ),
-          const SizedBox(height: 32),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () =>
-                      Navigator.popUntil(context, (r) => r.isFirst),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: c.gold,
-                    side: BorderSide(color: c.gold),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
-                  ),
-                  child: const Text('ホームへ'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            DiaryListPage(uid: widget.uid),
-                      ),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: c.gold,
-                    foregroundColor: c.onAccent,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
-                  ),
-                  child: const Text('事件簿アーカイブへ'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // テキスト編集画面
   Widget _buildEditorView(bool isEdit, AppColors c) {
     return Column(
       children: [
@@ -170,14 +125,10 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
               maxLines: null,
               expands: true,
               textAlignVertical: TextAlignVertical.top,
-              style: TextStyle(
-                  fontSize: 15,
-                  color: c.textPrimary,
-                  height: 1.7),
+              style: TextStyle(fontSize: 15, color: c.textPrimary, height: 1.7),
               decoration: InputDecoration(
                 hintText: '今日の出来事を自由に記述してください…',
-                hintStyle: TextStyle(
-                    color: c.textSecondary),
+                hintStyle: TextStyle(color: c.textSecondary),
                 filled: true,
                 fillColor: c.cardBg,
                 border: OutlineInputBorder(
@@ -203,17 +154,25 @@ class _DiaryEditPageState extends State<DiaryEditPage> {
                 foregroundColor: c.onAccent,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(4)),
+                  borderRadius: BorderRadius.circular(4),
+                ),
               ),
               child: _isSaving
                   ? SizedBox(
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(
-                          color: c.onAccent, strokeWidth: 2))
-                  : Text(isEdit ? '編集を保存する' : '日記を保存する',
+                        color: c.onAccent,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : Text(
+                      isEdit ? '編集を保存する' : '日記を保存する',
                       style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
             ),
           ),
         ),

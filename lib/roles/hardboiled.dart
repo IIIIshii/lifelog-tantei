@@ -18,42 +18,30 @@ const Role hardboiledRole = Role(
       '「依頼人は〜」「〜が確認された」のような硬質で簡潔な三人称で記述する。',
   analystStyle: '寡黙な探偵が事件簿群を読み返す所見。硬質で簡潔な三人称で記す。',
   questionTexts: {
-    // 出来事（5W1H）
-    'event_when': 'それはいつの話だ？',
-    'event_where': 'どこで起きた？',
-    'event_who': '誰に関わる話だ？',
-    'event_what': '何があった？話してくれ。',
-    'event_how': 'そのとき、どう感じた？',
-    // カスタム質問
-    'q_sleep': '昨夜は何時間眠った？',
-    'q_food': '今日、何を口にした？',
-    'q_exercise': '身体を動かしたか？',
-    'q_study': '今日、頭を使う作業はしたか？',
-    // 思い出しアシスト
-    'q_morning': '午前中の動向を報告してくれ。',
-    'q_afternoon': '午後はどう動いた？',
-    'q_evening': '夜の動向は？',
-    // ナレーション
-    'intro_start': '今日の事件簿を記録するとしよう。',
-    'intro_custom': 'まず、いくつか確認させてもらう。',
-    'confirm_include': '証言を記録した。これからお聞きする出来事の報告書に、この内容も含めるか？',
-    'intro_recall': '今日一日の行動を洗いざらい話してもらおう。',
-    'intro_event': '今日の核心となる出来事について話を聞こう。何か思い当たる節はあるか？',
-    'ask_addendum': '他に言い残したことはあるか？',
-    'intro_modeselect': '進め方を決めろ。',
+    // ── 聴取（出来事を選んで深掘りする） ──
+    'intro_topics': '今日の事件簿を作る。どの件から洗う？',
+    'topic_more': '他に押さえておく件はあるか？',
+    'topic_custom': 'どんな件だ？ ひとことで言ってくれ。',
+    'topic_close': 'この件は押さえた。',
+    'topic_question_fallback': 'そのとき、どんな場面だった？',
+    'diary_exists': 'この日の事件簿はすでにある。どうするつもりだ？',
+    'diary_generated': '事件簿をまとめた。確認してくれ。',
+    'diary_done': '以上だ。事件簿は綴じておいた。',
+    'revisit_notice': '質問の「今日」は、その日のことだと思って答えろ。',
     // ── 相談室（目標の壁打ち） ──
     'intro_consult': '追いたい事件があるらしいな。漠然としたままでいい、話してみろ。',
-    'revisit_notice': '質問の「今日」は、その日のことだと思って答えろ。',
     'consult_revise': 'どこを変えたい？ 話してくれ。',
     'consult_rethink': 'どこが違う？ 聞かせてくれ。',
     'consult_saved': '契約成立だ。今日から追跡を始める。',
     'goal_empty': '追うべき事件は、まだ決まっていない。',
-    // ── 目標の報告（毎日の進捗確認） ──
-    'intro_goal_checkin': '追っている事件の報告を聞こう。',
-    'goal_checkin_switch': '次はこの事件だ。',
-    'goal_checkin_numeric_retry': '数字が拾えなかった。数字だけで頼む。',
-    'goal_checkin_done': '報告は受け取った。記録しておく。',
-    'goal_checkin_recorded': '今日の報告はもう受けている。',
+    // ── 記録の項目（対話入力用・未実装） ──
+    'q_sleep': '昨夜は何時間眠った？',
+    'q_food': '今日、何を口にした？',
+    'q_exercise': '身体を動かしたか？',
+    'q_study': '今日、頭を使う作業はしたか？',
+    'q_morning': '午前中の動向を報告してくれ。',
+    'q_afternoon': '午後はどう動いた？',
+    'q_evening': '夜の動向は？',
   },
   // ボタン選択への固定リアクション（API不使用）。ネガティブな評価はしない。
   reactionTexts: {
@@ -62,12 +50,5 @@ const Role hardboiledRole = Role(
     'exercise:していない': '休むのも務めのうちだ。',
     'study:した': '頭を使ったか。冴えてるな。',
     'study:していない': '時には頭を休めることだ。',
-    'event_when': 'なるほど、その時間帯か。続けてくれ。',
-    'event_where': 'その場所か。覚えておく。',
-    'event_who': '……把握した。',
-    'event_how:嬉しかった': 'いい顔をしている。覚えておく。',
-    'event_how:面白かった': 'ふっ、悪くない一日だったようだな。',
-    'event_how:悲しかった': 'そうか。…無理に笑わなくていい。',
-    'event_how:怒った': '腹に据えかねたか。その感情も記録に値する。',
   },
 );

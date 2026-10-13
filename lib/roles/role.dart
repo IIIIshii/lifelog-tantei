@@ -3,19 +3,17 @@
 // 実行時のGemini生成は行わず、ここに静的に書かれた文面をそのまま使う。
 //
 // questionTexts のキー（全ロール共通の語彙）:
-//   出来事       : event_when / event_where / event_who / event_what / event_how
-//   カスタム質問 : q_sleep / q_food / q_exercise / q_study
-//   思い出し     : q_morning / q_afternoon / q_evening
-//   ナレーション : intro_start / intro_custom / confirm_include / intro_recall / intro_event /
-//                  intro_modeselect / ask_addendum
+//   聴取         : intro_topics / topic_more / topic_custom / topic_close /
+//                  topic_question_fallback / diary_exists / diary_generated / diary_done
 //   再捜査       : revisit_notice
 //   相談室       : intro_consult / consult_revise / consult_rethink /
 //                  consult_saved / goal_empty
-//   目標の報告   : intro_goal_checkin / goal_checkin_switch / goal_checkin_numeric_retry /
-//                  goal_checkin_done / goal_checkin_recorded
+//   記録の項目   : q_sleep / q_food / q_exercise / q_study / q_morning / q_afternoon / q_evening
+//                  （日々の記録を対話で入力する機能のための文面。対話入力は未実装で、
+//                   今は表の入力だけがある。実装するときにここから引く）
 //
-// 注: choices（朝/昼/夜・睡眠時間など）と custom_i（ユーザー定義質問）は Role に持たせない。
-//     前者は回答データとして保存・パースされる固定値、後者はユーザー入力そのものを使うため。
+// 注: 記録項目の選択肢（気分など）とユーザーが足した項目の名前は Role に持たせない。
+//     前者は値として保存・集計される固定値、後者はユーザー入力そのものを使うため。
 //     Role は「質問・ナレーションの文面」だけを担当する。
 class Role {
   final String key; // 'hardboiled' など。UserSettings.selectedRole と一致させる
@@ -26,9 +24,9 @@ class Role {
   final Map<String, String> questionTexts; // 質問・ナレーションキー → 文面
 
   // ボタン選択式の回答に対する固定リアクション文面。Gemini を呼ばずにそのまま使う。
-  // キーは '<回答キー>:<選択肢>'（例 'event_how:悲しかった'）か '<回答キー>'（例 'sleep'）。
-  // 前者は選択肢で意味が分岐するもの（感情・した/していない）、後者は共通の相槌で足りるもの。
-  // 自由記述への反応は Gemini 生成（GeminiService.generateReaction）が担当するためここには持たない。
+  // キーは '<項目id>:<選択肢>'（例 'exercise:した'）か '<項目id>'（例 'sleep'）。
+  // 前者は選択肢で意味が分岐するもの、後者は共通の相槌で足りるもの。
+  // q_* と同じく、日々の記録を対話で入力する機能（未実装）のための文面。
   final Map<String, String> reactionTexts;
 
   // 事件簿（日記）生成時の文体・視点指示。AiInstructions.diaryWriter() に差し込まれる。
@@ -41,7 +39,8 @@ class Role {
   // 役割（傾向・兆候・励ましをまとめる）とルールは AiInstructions 側に集約する。
   final String analystStyle;
 
-  // AI による深堀り（フォローアップ）質問の上限回数。キャラクターの性格に応じて変える。
+  // 聴取で1つの出来事について重ねる深堀り質問の上限回数（最初の質問は含めない）。
+  // キャラクターの性格に応じて変える。
   // 将来的にはユーザーがこの値をカスタマイズできるようにする予定。
   final int followUpCount;
 

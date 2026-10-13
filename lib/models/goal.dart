@@ -22,16 +22,16 @@ enum GoalActionType {
   check, // 達成／未達の2択で記録する（ジムに行った、など）
 }
 
-// 日々の回答マップでの、目標由来のキーにつく接頭辞。
-// DiaryPage がこれを見て「数値としても控えるか」を判断する。
+// 日々の記録（records/{date} の values）での、目標由来の項目 id につく接頭辞。
+// 値のキーを見ただけで、目標の項目だと分かるようにする。
 const String kGoalAnswerPrefix = 'goal_';
 
-// チェック型の回答に使う固定の選択肢。
-// 分析室の達成率もこの文字列との一致で数えるため、表示とデータで同じ定数を使う。
+// チェック型の項目の表示。値そのものは bool で保存する
+// （daily_record.dart の yesNoLabel がこの文言で表に出す）。
 const String kGoalDone = '達成';
 const String kGoalNotDone = '未達';
 
-// AI の見立てから受け取る行動項目・独自質問の上限。
+// AI の見立てから受け取る行動項目・提案する記録項目（問い）の上限。
 // 毎日答える項目が増えるほど記録は続かなくなるので、提案の時点で絞る。
 const int kMaxGoalActions = 3;
 const int kMaxGoalQuestions = 5;
@@ -42,7 +42,7 @@ const int kMaxGoalQuestions = 5;
 const int kMaxTrackedGoals = 3;
 
 // 全目標を合わせた行動項目の上限。
-// 1目標あたり3件（kMaxGoalActions）でも3目標で9問になり、尋問が記録ではなく作業になる。
+// 1目標あたり3件（kMaxGoalActions）でも3目標で9項目になり、毎日の記録が作業になる。
 // 目標が何件あっても、毎日増える質問はここまでに抑える。
 const int kMaxTotalGoalActions = 5;
 
@@ -65,9 +65,9 @@ String goalActionTypeTo(GoalActionType type) =>
 //
 // goal-archive へドキュメントを移す方式をやめ、goals/{goalId} に留めたまま
 // この status で「追跡中」と「追跡を終えた」を区別する。
-// 目標が配下に日々の記録（entries サブコレクション）を持つようになったためで、
-// Firestore はドキュメントを移してもサブコレクションを一緒に動かさない
-// ―― 移す方式のままだと、解決した事件の記録が置き去りになる。
+// 行動項目の定義（ラベル・単位）は目標のドキュメントにしか無く、日々の記録
+// （records/{date}）に残る 'goal_<id>' の値はこれを引いて初めて読める。
+// 追跡を終えた目標も消さず同じ場所に置いておけば、過去の記録が読めなくならない。
 // ──────────────────────────────────────────────────────────────
 enum GoalStatus {
   active, // 追跡中
@@ -214,7 +214,7 @@ class Goal {
   final String metric; // 達成の判定基準（どうなったら解決なのか）
   final String deadline; // 'YYYY-MM-DD'。期限を決めなかった場合は空文字
   final List<GoalAction> actions; // 日々の記録に差し込む行動項目
-  final List<String> suggestedQuestions; // AIが提案した独自質問の候補（未承認のもの）
+  final List<String> suggestedQuestions; // AIが提案した記録項目（問い）の候補（未承認のもの）
   final String createdAt; // 'YYYY-MM-DD'。経過日数の起点
 
   /// 追跡中か、追跡を終えたか。
@@ -607,14 +607,14 @@ Goal goalFromArchiveDoc(
   );
 }
 
-// その日に聞く質問を、目標をまたいで1本の列にする。
+// その日の記録の表に出す目標の項目を、目標をまたいで1本の列にする。
 //
 // 目標の並び（新しい順）のまま、各目標の項目を定義順に並べる。全体で max 件まで。
-// 目標が何件あっても毎日の質問がそれに比例して増えないようにするための上限で、
+// 目標が何件あっても毎日の項目がそれに比例して増えないようにするための上限で、
 // 件数が記録を続けられるかどうかを決める（kMaxTotalGoalActions の趣旨）。
 //
-// 上限は相談室で守っているが、上限を入れる前のデータで溢れていても尋問は長くしない。
-// 溢れた場合は後ろ（＝古い目標）の質問から落ちる。
+// 上限は相談室で守っているが、上限を入れる前のデータで溢れていても表は長くしない。
+// 溢れた場合は後ろ（＝古い目標）の項目から落ちる。
 //
 // 画面から切り出して純関数にしているのは、Firestore を起動せずに
 // 「目標の順 × 項目の順」と切り詰めを検証できるようにするため

@@ -1,27 +1,25 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import 'analytics_page.dart';
+import 'case_files_page.dart';
 import 'consult_hub_page.dart';
-import 'diary_list_page.dart';
 import 'diary_page.dart';
-import 'goal_check_in_page.dart';
 import 'home_page.dart';
+import 'record_sheet_page.dart';
 import 'settings_page.dart';
 
 // ──────────────────────────────────────────────────────────────
-// アプリのシェル。ボトムナビゲーションで5つのタブを束ねる。
+// アプリのシェル。ボトムナビゲーションで4つのタブを束ねる。
 //
-// なぜハブ＆スポーク（ホームからの Navigator.push）をやめるのか：
-// 頻繁に行き来する「記録・事件簿・分析」を切り替えるたびにホームへ戻る必要があり、
-// タップ対象も画面上部に集中していた。Material 3 は compact サイズでは
-// ボトムナビゲーションを推奨しており（Drawer が非推奨な理由も、上部に手を伸ばす
-// 必要があること）、主要動線を親指の届く画面下部へ移す。
+//   事務所（今日）／ 事件簿（記録確認）／ 相談室（目標）／ 設定
 //
-// destination は5つ。Material 3 / Apple HIG ともに 3〜5 が推奨範囲で、その上限。
-// 枠が5つしか無いので、毎日は開かない「探偵の指名」は設定ページ配下の push へ戻し、
-// 空いた枠を相談室（追跡中の事件のハブ）に充てている
-// ―― 目標は毎日の記録の主題で、ホームからの push より行き来が多いため。
+// ナビゲーションバーには「行き先」だけを置く（Material 3 の指針）。
+// 毎日の主要動線である「今日の捜査」は行き先ではなく操作なので、タブにせず
+// 事務所タブの Extended FAB に置いている。押すと、終わっていない段だけを
+// 日々の記録 → 聴取（日記）の順に開く。各段だけを開く入口は事務所のカードにある。
+//
+// 以前は事件簿と分析室が別々のタブだった。どちらも「記録を読み返す」行き先なので
+// 事件簿タブの中の上部タブにまとめ、5つから4つに減らした。
 // ──────────────────────────────────────────────────────────────
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
@@ -32,43 +30,35 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   static const int _homeIndex = 0;
+  static const int _caseFilesIndex = 1;
   static const int _consultIndex = 2;
-  static const int _settingsIndex = 4;
-  static const int _tabCount = 5;
+  static const int _settingsIndex = 3;
+  static const int _tabCount = 4;
 
   late final String _uid;
 
   int _index = _homeIndex;
 
   // 一度でも開いたタブの index。
-  // ConsultHubPage / AnalyticsPage / SettingsPage は initState で Firestore を読むため、
-  // 素の IndexedStack だと起動時に5画面ぶん一斉にフェッチしてしまう。
+  // 事件簿（分析）・相談室・設定は initState で Firestore を読むため、
+  // 素の IndexedStack だと起動時に全画面ぶん一斉にフェッチしてしまう。
   // 未訪問のタブには空ウィジェットを置き、初回表示まで生成を遅らせる。
   final Set<int> _visited = {_homeIndex};
 
-  // ホームの再読込シグナル。
+  // 各タブの再読込シグナル。
   // IndexedStack はページを破棄しないので、他タブでの変更（相談室での目標の
-  // 増減、デモデータ投入など）をホームに反映するには明示的な合図が要る。
+  // 増減、記録の書き足し、デモデータ投入など）を反映するには明示的な合図が要る。
+  // まとめて Map で持たないのは、どのタブが再読込を要るのかが読み取れなくなるため。
   final ValueNotifier<int> _homeRefresh = ValueNotifier<int>(0);
-
-  // 相談室ハブの再読込シグナル。_homeRefresh と同じ理由で要る
-  // （尋問で目標の項目に答えると「本日記録済み」の表示が変わる）。
-  // まとめて Map で持たないのは、どのタブが再読込を要るのかが
-  // 読み取れなくなるため。
+  final ValueNotifier<int> _caseFilesRefresh = ValueNotifier<int>(0);
   final ValueNotifier<int> _consultRefresh = ValueNotifier<int>(0);
-
-  // 設定の再読込シグナル。相談室で独自質問が増えるため、開くたびに読み直す。
-  // saveUserSettings が .set() の全置換なので、古い設定を握ったままトグルを
-  // 触ると、その間に増えた質問を巻き戻してしまう。
   final ValueNotifier<int> _settingsRefresh = ValueNotifier<int>(0);
 
-  // 今日の記録有無。HomePage が読み込み結果を書き込み、FAB のラベルに反映する。
-  final ValueNotifier<bool?> _todayDone = ValueNotifier<bool?>(null);
-
-  // 今日聞くべき目標があるか。これも HomePage が書き込む（_todayDone と同じ流儀）。
-  // FAB のためだけに Firestore をもう一度読まないため、既に目標を読んでいる
-  // ホームの結果を借りる。
-  final ValueNotifier<bool> _hasGoals = ValueNotifier<bool>(false);
+  // 今日の進み具合。HomePage が読み込み結果を書き込み、FAB のラベルと
+  // 「日々の記録を挟むか」の判定に使う（FAB のために Firestore を読み直さない）。
+  final ValueNotifier<TodayStatus?> _todayStatus = ValueNotifier<TodayStatus?>(
+    null,
+  );
 
   @override
   void initState() {
@@ -80,79 +70,85 @@ class _MainShellState extends State<MainShell> {
   @override
   void dispose() {
     _homeRefresh.dispose();
+    _caseFilesRefresh.dispose();
     _consultRefresh.dispose();
     _settingsRefresh.dispose();
-    _todayDone.dispose();
-    _hasGoals.dispose();
+    _todayStatus.dispose();
     super.dispose();
   }
-
-  void _bumpHomeRefresh() => _homeRefresh.value++;
 
   void _selectTab(int i) {
     setState(() {
       _index = i;
       _visited.add(i);
     });
-    // 事務所タブに戻ってきたタイミングで最新の状態を取り直す
-    if (i == _homeIndex) _bumpHomeRefresh();
-    // 相談室と設定も同じ理由で取り直す
-    if (i == _consultIndex) _consultRefresh.value++;
-    if (i == _settingsIndex) _settingsRefresh.value++;
+    // タブに戻ってきたタイミングで最新の状態を取り直す
+    switch (i) {
+      case _homeIndex:
+        _homeRefresh.value++;
+      case _caseFilesIndex:
+        _caseFilesRefresh.value++;
+      case _consultIndex:
+        _consultRefresh.value++;
+      case _settingsIndex:
+        _settingsRefresh.value++;
+    }
   }
 
-  // 主要動線。追跡中の事件があれば、日記の捜査より先に目標の報告を聞く。
+  // 主要動線。今日の記録がまだ埋まっていなければ表を先に開き、
+  // 「日記へ進む」で戻ってきたら聴取へ続ける。記録が埋まっていれば聴取から始める。
   //
-  // 日記と目標は別の記録なので画面も分けている。報告画面は pop の戻り値で
-  // 「このまま捜査へ進むか」を返し、ここがその先を決める。
+  // 表と聴取を別画面にしているのは、記録は1日に何度でも書き足すもので、
+  // 聴取は日記を書くときに1回通すものだから。表は pop の戻り値で
+  // 「このまま日記へ進むか」を返し、ここがその先を決める。
   //
-  // pushReplacement で日記へ差し替えないのは、置き換えると元ルートの future が
-  // その場で完了し、日記を書き終える前に下の refresh が走ってしまうため。
-  //
-  // 目標が0件のときは報告画面を開かない（空の画面が一瞬挟まるのを避ける）。
-  Future<void> _openDiary() async {
-    if (_hasGoals.value) {
+  // pushReplacement で聴取へ差し替えないのは、置き換えると元ルートの future が
+  // その場で完了し、日記を書き終える前に下の再読込が走ってしまうため。
+  Future<void> _startToday() async {
+    final status = _todayStatus.value;
+    final needsRecord =
+        status == null || (status.total > 0 && status.filled < status.total);
+    if (needsRecord) {
       final toDiary = await Navigator.push<bool>(
         context,
-        MaterialPageRoute<bool>(builder: (_) => GoalCheckInPage(uid: _uid)),
+        MaterialPageRoute<bool>(
+          builder: (_) => RecordSheetPage(uid: _uid, continueToDiary: true),
+        ),
       );
-      if (toDiary == true && mounted) {
-        await Navigator.push<void>(
-          context,
-          MaterialPageRoute<void>(builder: (_) => const DiaryPage()),
-        );
+      if (toDiary != true || !mounted) {
+        _refreshAfterCase();
+        return;
       }
-    } else {
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute<void>(builder: (_) => const DiaryPage()),
-      );
     }
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const DiaryPage()),
+    );
     if (!mounted) return;
-    _bumpHomeRefresh();
-    // 目標の報告が入ると相談室の「本日記録済み」も変わる
+    _refreshAfterCase();
+  }
+
+  // 記録・日記を書いたあとに変わる画面を取り直す
+  void _refreshAfterCase() {
+    _homeRefresh.value++;
+    // 目標の項目を記録すると相談室の「本日記録済み」も変わる
     _consultRefresh.value++;
+    _caseFilesRefresh.value++;
   }
 
   Widget _buildTab(int i) {
     switch (i) {
-      case 0:
+      case _homeIndex:
         return HomePage(
           uid: _uid,
           refreshSignal: _homeRefresh,
-          todayDone: _todayDone,
-          hasGoals: _hasGoals,
+          todayStatus: _todayStatus,
           onOpenConsultTab: () => _selectTab(_consultIndex),
-          // 本日の事件カードからの入り口も FAB と同じ動線にする。
-          // 分けたままだと「カードから入ると目標を聞かれない」という差が残る。
-          onOpenDiary: _openDiary,
         );
-      case 1:
-        return DiaryListPage(uid: _uid);
-      case 2:
+      case _caseFilesIndex:
+        return CaseFilesPage(uid: _uid, refreshSignal: _caseFilesRefresh);
+      case _consultIndex:
         return ConsultHubPage(uid: _uid, refreshSignal: _consultRefresh);
-      case 3:
-        return const AnalyticsPage();
       default:
         return SettingsPage(refreshSignal: _settingsRefresh);
     }
@@ -163,7 +159,7 @@ class _MainShellState extends State<MainShell> {
     return Scaffold(
       // 各タブページは自前の Scaffold と AppBar を持つ。シェルがルート
       // （AuthGate の直下）なので Navigator.canPop が false になり、
-      // AppBar の戻る矢印は自動的に出ない。既存ページの改修は不要。
+      // AppBar の戻る矢印は自動的に出ない。
       body: IndexedStack(
         index: _index,
         children: [
@@ -176,13 +172,17 @@ class _MainShellState extends State<MainShell> {
       // 画面の primary action は1画面につき1つ。ラベル付きにすることで
       // 何が起きるかが明示され、タップ面積も広く取れる。事務所タブでのみ出す。
       floatingActionButton: _index == _homeIndex
-          ? ValueListenableBuilder<bool?>(
-              valueListenable: _todayDone,
-              builder: (context, done, _) => FloatingActionButton.extended(
-                onPressed: _openDiary,
-                icon: const Icon(Icons.edit_note),
-                label: Text(done == true ? '捜査を続ける' : '捜査を開始する'),
-              ),
+          ? ValueListenableBuilder<TodayStatus?>(
+              valueListenable: _todayStatus,
+              builder: (context, status, _) {
+                final started =
+                    status != null && (status.filled > 0 || status.diaryDone);
+                return FloatingActionButton.extended(
+                  onPressed: _startToday,
+                  icon: const Icon(Icons.edit_note),
+                  label: Text(started ? '捜査を続ける' : '今日の捜査を始める'),
+                );
+              },
             )
           : null,
 
@@ -210,11 +210,6 @@ class _MainShellState extends State<MainShell> {
             icon: Icon(Icons.flag_outlined),
             selectedIcon: Icon(Icons.flag),
             label: '相談室',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.insights_outlined),
-            selectedIcon: Icon(Icons.insights),
-            label: '分析室',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),

@@ -30,7 +30,7 @@ class ConsultHubPage extends StatefulWidget {
 
   /// MainShell が値を進めるたびに再読込するシグナル。
   /// タブは IndexedStack で保持され破棄されないため、他タブでの変更
-  /// （尋問で目標の項目に答えた、など）を反映するにはこの明示的な合図が要る。
+  /// （日々の記録で目標の項目を書いた、など）を反映するにはこの明示的な合図が要る。
   final ValueListenable<int> refreshSignal;
 
   const ConsultHubPage({
@@ -71,24 +71,23 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
     // 旧 goal-archive に残っているものの引き上げもこの中で済む。
     final goalsFuture = _firestore.getAllGoals(widget.uid);
     final settingsFuture = _firestore.getUserSettings(widget.uid);
+    // 「本日記録済み」は今日の日々の記録に、その目標の項目の値があるかで判定する
+    final todayFuture = _firestore.getRecord(
+      widget.uid,
+      dateKey(DateTime.now()),
+    );
 
     try {
       final divided = await goalsFuture;
       final settings = await settingsFuture;
-      // 「本日記録済み」は目標ごとのエントリで判定する
-      // （日々の記録が日記のエントリから目標の配下へ移ったため）
-      final todayEntries = await _firestore.getGoalEntriesOn(
-        widget.uid,
-        divided.active.map((goal) => goal.id),
-        dateKey(DateTime.now()),
-      );
+      final today = await todayFuture;
       if (!mounted) return;
 
       setState(() {
         _goals = divided.active;
         _closed = divided.closed;
         _role = roleFor(settings.selectedRole);
-        _recordedGoalIds = goalsRecordedIn(todayEntries, divided.active);
+        _recordedGoalIds = goalsRecordedIn(today, divided.active);
         _loading = false;
         _failed = false;
       });
@@ -137,9 +136,9 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
         content: Text(
           solved
               ? '「${goal.title}」を解決済みとして記録する。'
-                    '毎日の報告からこの事件の質問が外れる。これまでの記録は残る。'
+                    '日々の記録からこの事件の項目が外れる。これまでの記録は残る。'
               : '「${goal.title}」を解決済みの事件へ移す。'
-                    '毎日の報告から質問が外れるだけで、これまでの記録は残る。',
+                    '日々の記録から項目が外れるだけで、これまでの記録は残る。',
         ),
         actions: [
           TextButton(
@@ -264,7 +263,7 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
               const SectionLabel('解決済みの事件', icon: Icons.inventory_2_outlined),
               const SizedBox(height: 12),
               for (final goal in _closed) ...[
-                // 追跡を終えても記録は目標の配下に残るので、ここからも辿れる
+                // 追跡を終えても日々の記録に値が残るので、ここからも辿れる
                 _ClosedGoalTile(goal: goal, onTap: () => _openGoalLog(goal)),
                 const SizedBox(height: 10),
               ],
@@ -444,7 +443,7 @@ class _NewCaseTile extends StatelessWidget {
 
 // 追跡を終えた事件の行。
 //
-// ここは「何を追い終えたか」の棚。記録そのものは目標の配下に残っているので、
+// ここは「何を追い終えたか」の棚。記録そのものは日々の記録に残っているので、
 // タップ先（記録一覧）は追跡を終えたあとも開ける。
 class _ClosedGoalTile extends StatelessWidget {
   final Goal goal;

@@ -1,19 +1,19 @@
-// カスタム質問の出題スケジュールを判定する純粋関数群。
+// 記録項目を表に出す曜日を判定する純粋関数群。
 //
-// 質問ごとに出題する曜日（1=月〜7=日）を持たせている。判定を UI から切り離し、
+// 項目ごとに表へ出す曜日（1=月〜7=日）を持たせている。判定を UI から切り離し、
 // 曜日番号の取り違え（DateTime.weekday は月曜始まり）を単体テストで押さえる。
-import '../models/user_settings.dart';
+import '../models/record_field.dart';
 
 /// 曜日番号（1=月〜7=日）に対応する1文字の表示名。
 const List<String> kWeekdayLabels = ['月', '火', '水', '木', '金', '土', '日'];
 
-/// question を date の日に出題するか。
-bool isAskedOn(CustomQuestion question, DateTime date) =>
-    question.weekdays.contains(date.weekday);
+/// field を date の日の表に出すか。
+bool isFieldShownOn(RecordField field, DateTime date) =>
+    field.weekdays.contains(date.weekday);
 
 /// weekday（1〜7）をオン/オフした後の曜日リストを返す（昇順）。
 ///
-/// 最後の1曜日はオフにできない（0曜日だと永久に出題されなくなるため）。
+/// 最後の1曜日はオフにできない（0曜日だと永久に表へ出なくなるため）。
 /// その場合は元のリストをそのまま返す。
 List<int> toggleWeekday(List<int> weekdays, int weekday) {
   final set = weekdays.toSet();

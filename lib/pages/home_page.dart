@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../core/daily_record.dart';
 import '../core/goal_progress.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
@@ -15,6 +16,8 @@ import '../widgets/goal_case_tile.dart';
 import '../widgets/section_label.dart';
 import '../widgets/status_badge.dart';
 import 'diary_detail_page.dart';
+import 'diary_page.dart';
+import 'record_sheet_page.dart';
 import 'role_select_page.dart';
 import 'self_analysis_page.dart';
 
@@ -23,18 +26,21 @@ import 'self_analysis_page.dart';
 const int _lookbackDays = 30;
 
 // ホーム（事務所）タブに表示する「直近の事件」の最大件数。
-// これ以上は事件簿アーカイブタブの仕事なので、ホームでは3件に留める。
+// これ以上は事件簿タブの仕事なので、ホームでは3件に留める。
 const int _recentPreviewCount = 3;
 
 const List<String> _weekdayJa = ['月', '火', '水', '木', '金', '土', '日'];
 
+/// 今日の捜査の進み具合。ホームが読み込んで MainShell へ渡し、
+/// FAB のラベルと「日々の記録を挟むか」の判定に使う。
+typedef TodayStatus = ({int filled, int total, bool diaryDone});
+
 // ──────────────────────────────────────────────────────────────
 // ホーム画面（事務所タブ）
 //
-// メニューの羅列をやめ、「本日の事件」ヒーローカードで状態を最初に見せる構成。
-// 主要動線（日記をつける）は MainShell 側の Extended FAB が担うため、
-// ここでは同じ行き先をカード全体のタップにも持たせている
-// （FABに手が届かない両手操作のユーザー向けの重複導線）。
+// 「本日の捜査」カードで、今日の2段（日々の記録 → 事件簿）の進み具合を最初に見せる。
+// 通しで進める主要動線は MainShell 側の Extended FAB が担い、
+// ここでは各段を個別に開けるようにしている（項目だけ書き足したいとき用）。
 // ──────────────────────────────────────────────────────────────
 class HomePage extends StatefulWidget {
   final String uid;
@@ -44,32 +50,20 @@ class HomePage extends StatefulWidget {
   /// （探偵の指名、デモデータ投入など）を反映するにはこの明示的な合図が要る。
   final ValueListenable<int> refreshSignal;
 
-  /// 今日の記録有無を MainShell へ伝える出力。FAB のラベル切替に使う。
-  /// 読み込み前は null。
-  final ValueNotifier<bool?> todayDone;
-
-  /// 今日聞くべき目標があるかを MainShell へ伝える出力。
-  /// FAB が目標の報告画面を挟むかの判定に使う。ここが読み込んだ目標を
-  /// そのまま渡すことで、FAB のために Firestore をもう一度読まずに済ませる。
-  final ValueNotifier<bool> hasGoals;
+  /// 今日の進み具合を MainShell へ伝える出力。読み込み前は null。
+  /// FAB のために Firestore をもう一度読まないよう、ここが読んだ結果を渡す。
+  final ValueNotifier<TodayStatus?> todayStatus;
 
   /// 「追跡中の事件」から相談室タブへ移動するためのコールバック。
   /// タブの index は MainShell の関心事なので、ここでは持たない。
   final VoidCallback onOpenConsultTab;
 
-  /// 記録の動線（目標の報告 → 日記の捜査）を開くコールバック。
-  /// 順番の決定は MainShell の仕事なので、ここでは呼ぶだけにする
-  /// （FAB とカードのタップで挙動が食い違わないようにするため）。
-  final VoidCallback onOpenDiary;
-
   const HomePage({
     super.key,
     required this.uid,
     required this.refreshSignal,
-    required this.todayDone,
-    required this.hasGoals,
+    required this.todayStatus,
     required this.onOpenConsultTab,
-    required this.onOpenDiary,
   });
 
   @override
@@ -84,8 +78,9 @@ class _HomePageState extends State<HomePage> {
   Role _role = roleFor(null);
   SelfAnalysis _selfAnalysis = SelfAnalysis.defaults();
   List<Goal> _goals = const [];
-  Set<String> _recordedGoalIds = const {}; // 今日、項目に答えた目標の id
+  Set<String> _recordedGoalIds = const {}; // 今日、項目に記録した目標の id
   Set<String> _written = const {};
+  ({int filled, int total}) _progress = (filled: 0, total: 0);
   String? _todayDiary;
   List<MapEntry<String, Map<String, dynamic>>> _recent = const [];
 
@@ -104,65 +99,71 @@ class _HomePageState extends State<HomePage> {
 
   void _handleRefreshSignal() => _load();
 
-  // ヒーローカードと直近リストに必要なデータをまとめて取得する。
-  // 「今日書いたか」は getRecentEntries の結果に今日の日付が含まれるかで判定できるため、
-  // getTodayDiary を別途呼ばずに Firestore の読み取り回数を増やさない。
+  // 本日の捜査カードと直近リストに必要なデータをまとめて取得する。
   Future<void> _load() async {
-    final entriesFuture = _firestore.getRecentEntries(
+    final recordsFuture = _firestore.getRecentRecords(
       widget.uid,
       _lookbackDays,
     );
+    final diariesFuture = _firestore.getRecentDiaries(
+      widget.uid,
+      _lookbackDays,
+    );
+    final fieldsFuture = _firestore.getFields(widget.uid);
     final settingsFuture = _firestore.getUserSettings(widget.uid);
     final selfAnalysisFuture = _firestore.getSelfAnalysis(widget.uid);
     final goalsFuture = _firestore.getGoals(widget.uid);
 
     try {
-      final entries = await entriesFuture;
+      final records = await recordsFuture;
+      final diaries = await diariesFuture;
+      final fields = await fieldsFuture;
       final settings = await settingsFuture;
       final selfAnalysis = await selfAnalysisFuture;
       final goals = await goalsFuture;
       if (!mounted) return;
 
-      // diary が非 null のものだけを「記録済み」とみなす。
-      // 会話の途中で終わったドキュメントも entries には存在するため、
-      // 事件簿アーカイブの絞り込み（diary_list_page）と基準を揃える。
-      final withDiary = entries.where((e) => e.value['diary'] != null).toList()
-        ..sort((a, b) => b.key.compareTo(a.key));
+      final now = DateTime.now();
+      final todayKey = dateKey(now);
+      Map<String, dynamic>? todayRecord;
+      for (final e in records) {
+        if (e.key == todayKey) todayRecord = e.value;
+      }
+      final progress = recordProgress(
+        fieldsForDay(fields, goals, now),
+        todayRecord,
+      );
 
-      final todayKey = dateKey(DateTime.now());
+      // 本文のある日記だけを新しい順に
+      final withText =
+          diaries
+              .where(
+                (e) => ((e.value['text'] as String?) ?? '').trim().isNotEmpty,
+              )
+              .toList()
+            ..sort((a, b) => b.key.compareTo(a.key));
       String? todayDiary;
-      for (final e in withDiary) {
-        if (e.key == todayKey) {
-          todayDiary = e.value['diary'] as String;
-          break;
-        }
+      for (final e in withText) {
+        if (e.key == todayKey) todayDiary = e.value['text'] as String;
       }
 
-      // 目標の記録有無は日記とは別のコレクション（目標ごとの entries）を見る。
-      // 日記を作っていない日でも目標の報告だけ済んでいることがあるため、
-      // 日記の有無とは独立に判定する。
-      final todayGoalEntries = await _firestore.getGoalEntriesOn(
-        widget.uid,
-        goals.map((goal) => goal.id),
-        todayKey,
-      );
-      if (!mounted) return;
-
       setState(() {
-        _written = withDiary.map((e) => e.key).toSet();
-        _recent = withDiary.where((e) => e.key != todayKey).toList();
+        _written = recordedDates(records, diaries);
+        _recent = withText.where((e) => e.key != todayKey).toList();
         _todayDiary = todayDiary;
+        _progress = progress;
         _role = roleFor(settings.selectedRole);
         _selfAnalysis = selfAnalysis;
         _goals = goals;
-        _recordedGoalIds = goalsRecordedIn(todayGoalEntries, goals);
+        _recordedGoalIds = goalsRecordedIn(todayRecord, goals);
         _loading = false;
         _failed = false;
       });
-      widget.todayDone.value = todayDiary != null;
-      // 今日聞くべき事件があるかを FAB へ伝える。
-      // 着手より前の事件は今日の報告に出ないので、絞り込んだ結果で判定する。
-      widget.hasGoals.value = goalsTrackedOn(goals, todayKey).isNotEmpty;
+      widget.todayStatus.value = (
+        filled: progress.filled,
+        total: progress.total,
+        diaryDone: todayDiary != null,
+      );
     } catch (_) {
       if (!mounted) return;
       // 失敗しても RefreshIndicator で引き直せるので、画面は保ったまま印だけ出す
@@ -173,25 +174,30 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 本日の事件カードのタップ：記録済みなら詳細、未記録なら記録の動線へ。
-  //
-  // 未記録のときに DiaryPage を直接開かず MainShell のコールバックに委ねるのは、
-  // FAB と同じ順番（目標の報告 → 日記の捜査）を通すため。
-  void _openToday() {
-    final diary = _todayDiary;
-    if (diary == null) {
-      widget.onOpenDiary();
-      return;
-    }
+  // 「日々の記録」の段：今日の表を開く
+  void _openRecord() {
     Navigator.push(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => DiaryDetailPage(
-          date: dateKey(DateTime.now()),
-          diary: diary,
-          uid: widget.uid,
-          firestore: _firestore,
-        ),
+        builder: (_) => RecordSheetPage(uid: widget.uid),
+      ),
+    ).then((_) => _load());
+  }
+
+  // 「事件簿」の段：まとめ済みなら報告書、まだなら聴取を開く
+  void _openDiary() {
+    final diary = _todayDiary;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => diary == null
+            ? const DiaryPage()
+            : DiaryDetailPage(
+                date: dateKey(DateTime.now()),
+                diary: diary,
+                uid: widget.uid,
+                firestore: _firestore,
+              ),
       ),
     ).then((_) => _load());
   }
@@ -262,18 +268,20 @@ class _HomePageState extends State<HomePage> {
           // 中身が画面に収まっているときも引っ張って更新できるようにする
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            // ── 本日の事件（ヒーロー） ──────────────────────
+            // ── 本日の捜査（ヒーロー） ──────────────────────
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               sliver: SliverToBoxAdapter(
                 child: _TodayCaseCard(
                   loading: _loading,
                   today: today,
+                  progress: _progress,
                   todayDiary: _todayDiary,
                   role: _role,
                   weekFlags: recentDayFlags(_written, today, 7),
                   streak: calcStreak(_written, today),
-                  onTapCard: _openToday,
+                  onTapRecord: _openRecord,
+                  onTapDiary: _openDiary,
                   onTapRole: _openRoleSelect,
                 ),
               ),
@@ -366,7 +374,7 @@ class _HomePageState extends State<HomePage> {
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate((context, i) {
                     final entry = preview[i];
-                    final diary = entry.value['diary'] as String;
+                    final diary = entry.value['text'] as String;
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
                       child: CaseArchiveTile(
@@ -399,31 +407,39 @@ class _HomePageState extends State<HomePage> {
 }
 
 // ──────────────────────────────────────────────────────────────
-// 本日の事件カード（ヒーロー領域）
+// 本日の捜査カード（ヒーロー領域）
 //
 // 既存カードのデザイン言語（cardBg + cardBorder 枠 + 左端ゴールド4px縦帯）を
-// 踏襲しつつ、状態バッジ・担当探偵・週間ヒートマップを1枚にまとめる。
+// 踏襲しつつ、今日の2段（日々の記録・事件簿）・担当探偵・週間ヒートマップを
+// 1枚にまとめる。各段は行ごとにタップでき、その段だけを開く。
 // ──────────────────────────────────────────────────────────────
 class _TodayCaseCard extends StatelessWidget {
   final bool loading;
   final DateTime today;
+  final ({int filled, int total}) progress;
   final String? todayDiary;
   final Role role;
   final List<bool> weekFlags; // 7件、末尾が今日
   final int streak;
-  final VoidCallback onTapCard;
+  final VoidCallback onTapRecord;
+  final VoidCallback onTapDiary;
   final VoidCallback onTapRole;
 
   const _TodayCaseCard({
     required this.loading,
     required this.today,
+    required this.progress,
     required this.todayDiary,
     required this.role,
     required this.weekFlags,
     required this.streak,
-    required this.onTapCard,
+    required this.onTapRecord,
+    required this.onTapDiary,
     required this.onTapRole,
   });
+
+  // 記録は「項目が無い」日もあるので、その日は済んだものとして扱う
+  bool get _recordDone => progress.filled >= progress.total;
 
   String get _dateLabel =>
       '${today.year}年${today.month}月${today.day}日'
@@ -440,7 +456,8 @@ class _TodayCaseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final done = todayDiary != null;
+    final diaryDone = todayDiary != null;
+    final done = diaryDone && _recordDone;
 
     return Material(
       color: c.cardBg,
@@ -448,12 +465,7 @@ class _TodayCaseCard extends StatelessWidget {
         borderRadius: const BorderRadius.all(Radius.circular(4)),
         side: BorderSide(color: c.cardBorder),
       ),
-      child: InkWell(
-        onTap: loading ? null : onTapCard,
-        customBorder: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(4)),
-        ),
-        child: IntrinsicHeight(
+      child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -490,7 +502,7 @@ class _TodayCaseCard extends StatelessWidget {
                                 // 横幅を食い合って overflow するため。
                                 Expanded(
                                   child: Text(
-                                    '本日の事件',
+                                    '本日の捜査',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
@@ -516,33 +528,30 @@ class _TodayCaseCard extends StatelessWidget {
                                 color: c.textPrimary,
                               ),
                             ),
+                            const SizedBox(height: 8),
 
-                            // ── 記録済みなら本文プレビュー ─────
-                            if (done) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                todayDiary!.trim().isEmpty
-                                    ? '（本文なし）'
-                                    : todayDiary!,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  height: 1.6,
-                                  color: c.textSecondary,
-                                ),
-                              ),
-                            ] else ...[
-                              const SizedBox(height: 6),
-                              Text(
-                                'まだ調書は白紙のままだ。',
-                                style: DetectiveTextStyles.catchphrase(
-                                  color: c.textSecondary,
-                                ),
-                              ),
-                            ],
+                            // ── 今日の2段 ─────────────────────
+                            _StepRow(
+                              index: 1,
+                              title: '日々の記録',
+                              status: progress.total == 0
+                                  ? '項目なし'
+                                  : '記入 ${progress.filled} / ${progress.total}',
+                              done: _recordDone,
+                              onTap: onTapRecord,
+                            ),
+                            _StepRow(
+                              index: 2,
+                              title: '事件簿',
+                              status: diaryDone ? 'まとめ済み' : '未作成',
+                              done: diaryDone,
+                              preview: diaryDone && todayDiary!.trim().isNotEmpty
+                                  ? todayDiary
+                                  : null,
+                              onTap: onTapDiary,
+                            ),
 
-                            const SizedBox(height: 14),
+                            const SizedBox(height: 6),
                             Divider(height: 1, color: c.cardBorder),
                             const SizedBox(height: 4),
 
@@ -578,6 +587,107 @@ class _TodayCaseCard extends StatelessWidget {
             ],
           ),
         ),
+    );
+  }
+}
+
+// 今日の1段（日々の記録 / 事件簿）。行ごとにタップでき、その段だけを開く。
+class _StepRow extends StatelessWidget {
+  final int index;
+  final String title;
+  final String status;
+  final bool done;
+  final String? preview;
+  final VoidCallback onTap;
+
+  const _StepRow({
+    required this.index,
+    required this.title,
+    required this.status,
+    required this.done,
+    required this.onTap,
+    this.preview,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        // タップ領域を 48dp 以上に保つための余白
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 済んだ段は gold の塗り＋onAccent、まだの段は枠だけ
+            Container(
+              width: 22,
+              height: 22,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: done ? c.gold : Colors.transparent,
+                border: Border.all(color: c.gold),
+              ),
+              child: done
+                  ? Icon(Icons.check, size: 14, color: c.onAccent)
+                  : Text(
+                      '$index',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: c.gold,
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: c.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        status,
+                        style: TextStyle(fontSize: 12, color: c.textSecondary),
+                      ),
+                    ],
+                  ),
+                  if (preview != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      preview!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.5,
+                        color: c.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.chevron_right, size: 20, color: c.gold),
+          ],
+        ),
       ),
     );
   }
@@ -600,8 +710,7 @@ class _TodayCardPlaceholder extends StatelessWidget {
   }
 }
 
-// 担当探偵の行。カード全体の InkWell の内側に入れ子にして、
-// ここだけ探偵タブへ飛ばす（内側の InkWell がタップを吸収する）。
+// 担当探偵の行。タップで探偵の指名（RoleSelectPage）へ。
 class _RoleRow extends StatelessWidget {
   final Role role;
   final VoidCallback onTap;

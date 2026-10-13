@@ -36,20 +36,27 @@ flutter test test/widget_test.dart
 
 ## Architecture
 
-`AuthGate` → `MainShell` がルート。`MainShell` が NavigationBar の5タブ
-（事務所 / 事件簿 / 相談室 / 分析室 / 設定）を遅延 IndexedStack で束ねる。
+`AuthGate` → `MainShell` がルート。`MainShell` が NavigationBar の4タブ
+（事務所 / 事件簿 / 相談室 / 設定）を遅延 IndexedStack で束ねる。
+事件簿タブ（CaseFilesPage）は上部タブで「アーカイブ」と「分析」を切り替える。
 
-- `lib/pages/` — 画面。日記側は DiaryPage / DiaryListPage / DiaryDetailPage / DiaryEditPage、
-  目標側は ConsultHubPage（事件一覧）/ ConsultPage（見立ての壁打ち）/
-  GoalCheckInPage（毎日の報告）/ GoalLogPage・GoalLogDetailPage（記録の閲覧）
-- `lib/core/` — UI から独立した純関数（`goal_progress` / `chart_scale` / `streak` /
-  `numeric_answer` / `scroll`）とテーマ。Firestore を使わずテストできる形に保つ
+- `lib/pages/` — 画面。
+  - 日々の記録: RecordSheetPage（その日の表）/ FieldSettingsPage（記録の型の編集）
+  - 日記: DiaryPage（聴取）/ DiaryDetailPage / DiaryEditPage /
+    DiaryArchiveView・DiaryMonthPage（アーカイブ）/ AnalyticsView（分析）
+  - 目標: ConsultHubPage（事件一覧）/ ConsultPage（見立ての壁打ち）/ GoalLogPage（記録の閲覧）
+- `lib/core/` — UI から独立した純関数（`daily_record` / `goal_progress` / `chart_scale` /
+  `streak` / `numeric_answer` / `question_schedule` / `scroll`）とテーマ。
+  Firestore を使わずテストできる形に保つ
 - `lib/services/` — auth / firestore / gemini / notification / speech のシングルトン
 - `lib/models/`, `lib/roles/`, `lib/prompts/`, `lib/widgets/`
 
-**日記と目標の分離:** 日記の質問フロー（DiaryPage）に目標の関心事を混ぜない。
-目標の日々の報告は GoalCheckInPage が受け、保存先も別コレクション（下記データモデル）。
-ホームの FAB は「目標の報告 → 日記の新規捜査」の順に開く。
+**日々の記録と聴取の分離:** 事実（睡眠時間・気分・何をしたか・カスタム項目・目標の行動項目）は
+日々の記録の表（RecordSheetPage）で受け、聴取（DiaryPage）では聞かない。
+聴取は「出来事を選ぶ → 深掘り」を何度でも繰り返し、最後に1日1件の日記本文にまとめる。
+記録があれば読み込んで、話題の候補出しと日記の材料に使う。
+ホームの FAB は「日々の記録（未記入があれば）→ 聴取」の順に開く。
+日々の記録の対話入力は未実装（Role の q_* はそのための文面）。
 
 **Initialization order in `main()`:**
 1. `WidgetsFlutterBinding.ensureInitialized()` — must come first (required before any MethodChannel/platform call)
@@ -60,25 +67,34 @@ flutter test test/widget_test.dart
 
 **Data model (Firestore):**
 
-日記と目標は別のコレクションに分かれている。目標にも日記と同じ形の日付エントリと
-会話記録を持たせてあり、違いは日記本文（`diary`）を持たない点だけ。
-これにより `lib/core/goal_progress.dart` の集計を両方に使える（回答キーは `goal_<actionId>`）。
+「記録の型」（RecordField）と「日々の記録の実データ」を分けて持つ。
+その日の事実はすべて `records/{date}` の `values` に「項目 id → 値」で入り、
+値は Firestore の型のまま（数値は num、はい／いいえは bool、選択肢・テキストは String）。
+項目 id はプリセットが `sleep` / `mood` など、カスタムが `custom_<uuid>`、
+目標の行動項目が `goal_<actionId>`。
+
+記録の型の置き場所は2つ: 生活の記録・カスタム項目は `settings/fields`、
+目標の行動項目は `goals/{goalId}.actions`（目標を閉じれば表から外れる）。
+`RecordField.fromGoalAction` で同じ形に読み替え、`fieldsForDay` がその日の表を組む。
+項目は消さずに `active: false` にする（消すと過去の値が何の記録か読めなくなる）。
 
 ```
 users/{uid}/
-├ settings/preferences                  ← UserSettings
-├ entries/{YYYY-MM-DD}                  ← 日記
-│   diary / diaryMode / answers / numericAnswers / skipped / timestamp
-│   └ conversation/{autoId}  role / text / order / timestamp
+├ settings/preferences                  ← UserSettings（担当探偵・通知）
+├ settings/fields                       ← 記録の型 items[]（RecordField）
+│   id / label / kind(numeric|yesNo|choice|text) / unit / target / choices /
+│   weekdays / source(preset|self|consult) / useInDiary / active
+├ records/{YYYY-MM-DD}                  ← 日々の記録
+│   values{項目id: 値} / updatedAt
+├ diaries/{YYYY-MM-DD}                  ← 日記（1日1件）
+│   text / topics[]（聴取で話した出来事）/ role / mode('interview'|'manual') / updatedAt
+│   └ interview/{autoId}  role / text / order / topic / timestamp
 ├ analyses/latest, analyses/today        ← AI所見・今日のコメント
 ├ self-analysis/profile                  ← SelfAnalysis
 └ goals/{goalId}                         ← 目標（追跡を終えても消さない）
     id / title / metric / deadline / actions[] / suggestedQuestions[] / createdAt
     status: 'active' | 'solved' | 'abandoned' | 'closed'
     closedAt: 'YYYY-MM-DD'（追跡中は空文字）
-    └ entries/{YYYY-MM-DD}               ← 目標の日々の報告（diary は無い）
-        answers / numericAnswers / skipped / timestamp
-        └ conversation/{autoId}  role / text / order / timestamp
 ```
 
 遅延移行（読み取りのついでに直し、失敗しても読み込みは成功させる）:
@@ -89,16 +105,6 @@ users/{uid}/
 **Auth:** Anonymous auth only (`FirebaseAuth.instance.signInAnonymously()`), called on every save.
 
 **AI:** Gemini via `google_generative_ai` package. API key loaded from `.env` as `GEMINI_API_KEY`. Model: `gemini-2.5-flash`.
-
-## MVP Feature Plan (from README)
-
-1. **AIとの対話** — AI asks questions and follows up 1–2 times
-2. **証拠提出** — User selects from choices or short-text answers
-3. **事件簿生成** — AI generates a 100–300 char diary from the conversation
-4. **証拠保存** — Diary saved to Firestore
-5. **事件簿の閲覧** — List view of past diary entries
-
-Features 1–2 are partially implemented (single weather question, no multi-turn conversation yet).
 
 ## Environment
 
