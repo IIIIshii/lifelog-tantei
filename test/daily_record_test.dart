@@ -274,6 +274,61 @@ void main() {
     });
   });
 
+  // 「探偵に話す」の振り分け結果を、表に入れる提案へ直す部分
+  group('proposalsFromExtraction', () {
+    final fields = [_sleep, _exercise, _mood, _morning];
+
+    test('キーの番号を表の並び順で項目に戻し、型を揃える', () {
+      final proposals = proposalsFromExtraction(fields, {
+        'f0': 6.5,
+        'f1': true,
+        'f2': '良い',
+        'f3': '授業',
+      }, const {});
+      expect(proposals.map((p) => p.field.id), [
+        kSleepFieldId,
+        kExerciseFieldId,
+        kMoodFieldId,
+        kMorningFieldId,
+      ]);
+      expect(proposals.first.value, 6.5);
+      expect(proposals.every((p) => p.current == null), isTrue);
+    });
+
+    test('型の合わない値・選択肢に無い値・空は提案しない', () {
+      final proposals = proposalsFromExtraction(fields, {
+        'f0': 'たくさん',
+        'f1': 'はい',
+        'f2': '最高',
+        'f3': '  ',
+      }, const {});
+      expect(proposals, isEmpty);
+    });
+
+    test('数値が文字列で返ってきても読む', () {
+      final proposals = proposalsFromExtraction(fields, {'f0': '7.5'}, const {});
+      expect(proposals.single.value, 7.5);
+    });
+
+    test('今の値と同じ提案は出さず、違う値は今の値を添えて出す', () {
+      final proposals = proposalsFromExtraction(
+        fields,
+        {'f0': 7, 'f3': '散歩した'},
+        {kSleepFieldId: 7.0, kMorningFieldId: '授業'},
+      );
+      expect(proposals.single.field.id, kMorningFieldId);
+      expect(proposals.single.current, '授業');
+    });
+
+    test('返答に無い項目・範囲外のキーは無視する', () {
+      final proposals = proposalsFromExtraction(fields, {
+        'f9': 1,
+        'other': true,
+      }, const {});
+      expect(proposals, isEmpty);
+    });
+  });
+
   group('fieldIndex', () {
     test('使っていない項目・閉じた目標の項目も引ける', () {
       const unused = RecordField(id: 'u', label: '昔の項目', active: false);

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import '../core/daily_record.dart';
 import '../models/goal.dart';
 import '../models/record_field.dart';
 import '../models/self_analysis.dart';
@@ -25,6 +26,10 @@ class GeminiService {
   final GenerativeModel _consultModel;
 
   final String _role;
+
+  // 記録の振り分けは項目ごとに返させる形が変わるので、呼び出しのたびにモデルを作る。
+  // そのために API キーを持っておく。
+  final String _apiKey;
 
   // 自己分析（MBTI等）を systemInstruction の末尾へ差し込むためのブロック。
   // 初期化子リストでは計算ができないため、factory で組み立ててから private コンストラクタへ渡す。
@@ -57,6 +62,7 @@ class GeminiService {
     String interviewProfile,
     String analysisProfile,
   ) : _role = role,
+      _apiKey = apiKey,
       _interviewModel = GenerativeModel(
         model: 'gemini-2.5-flash',
         apiKey: apiKey,
@@ -167,6 +173,20 @@ class GeminiService {
                 description: '日々の記録に加える問いを3〜5件。未確定なら空配列',
                 items: Schema.string(description: '日々の記録で書き留める問い1件'),
               ),
+              'steps': Schema.array(
+                description: '目標までの途中の段階（順番どおり）。区切らないなら空配列',
+                items: Schema.object(
+                  properties: {
+                    'title': Schema.string(
+                      description: '段階の一文。数字を含める。例「まず1か月で2kg減らす」',
+                    ),
+                    'deadline': Schema.string(
+                      description: '段階の期限。YYYY-MM-DD 形式。決めないなら空文字',
+                    ),
+                  },
+                  requiredProperties: ['title', 'deadline'],
+                ),
+              ),
             },
             requiredProperties: [
               'reply',
@@ -176,10 +196,81 @@ class GeminiService {
               'deadline',
               'actions',
               'questions',
+              'steps',
             ],
           ),
         ),
       );
+
+  // ──────────────────────────────────────────────────────────────
+  // 日々の記録
+  // ──────────────────────────────────────────────────────────────
+
+  // まとめて話した内容から、記録の表の各項目の値を取り出させる。
+  //
+  // 戻り値は extractionKey（f0, f1, …）→ 生の値。表の項目への読み替えと型の検証は
+  // 呼び出し側が proposalsFromExtraction で行う（ここは AI とのやりとりだけ）。
+  // 読み取れない応答は空の Map にする（何も提案しないだけで、表の入力は続けられる）。
+  //
+  // 人格は使わない（記録係として事実を書き写すだけなので）。
+  Future<Map<String, dynamic>> extractRecordValues({
+    required String text,
+    required List<RecordField> fields,
+  }) async {
+    if (fields.isEmpty || text.trim().isEmpty) return const {};
+    final model = GenerativeModel(
+      model: 'gemini-2.5-flash',
+      apiKey: _apiKey,
+      systemInstruction: Content.system(AiInstructions.recordExtractor()),
+      generationConfig: GenerationConfig(
+        responseMimeType: 'application/json',
+        // どの項目も必須にしない。話に出てこなかった項目は返させない
+        responseSchema: Schema.object(
+          properties: {
+            for (var i = 0; i < fields.length; i++)
+              extractionKey(i): _extractionSchema(fields[i]),
+          },
+        ),
+      ),
+    );
+    final response = await model.generateContent([
+      Content.text(
+        DiaryPrompts.buildRecordExtractionPrompt(fields: fields, text: text),
+      ),
+    ]);
+    try {
+      final decoded = jsonDecode(response.text?.trim() ?? '');
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {
+      // 読み取れない応答は「提案なし」として扱う
+    }
+    return const {};
+  }
+
+  // 項目1つぶんの、返させる値の形
+  static Schema _extractionSchema(RecordField field) {
+    final description = field.promptLabel;
+    return switch (field.kind) {
+      FieldKind.numeric => Schema.number(
+        description: field.unit.isEmpty
+            ? description
+            : '$description（${field.unit}）',
+        nullable: true,
+      ),
+      FieldKind.yesNo => Schema.boolean(description: description, nullable: true),
+      // 選択肢の無い選択肢欄（壊れたデータ）は空の enum にせず文字列で受ける。
+      // 返ってきた値は normalizeInput が選択肢に無いものとして捨てる
+      FieldKind.choice when field.choices.isNotEmpty => Schema.enumString(
+        enumValues: field.choices,
+        description: description,
+        nullable: true,
+      ),
+      FieldKind.choice || FieldKind.text => Schema.string(
+        description: description,
+        nullable: true,
+      ),
+    };
+  }
 
   // ──────────────────────────────────────────────────────────────
   // 聴取

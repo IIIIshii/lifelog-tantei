@@ -1,22 +1,30 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import '../core/daily_record.dart';
+import '../core/goal_progress.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/goal.dart';
 import '../models/record_field.dart';
+import '../roles/roles.dart';
 import '../services/firestore_service.dart';
+import '../services/gemini_service.dart';
 import '../widgets/section_label.dart';
 import 'field_settings_page.dart';
+import 'record_tell_sheet.dart';
 
 // 日々の記録（チェックシート）。睡眠時間・今日の気分・午前にしたこと・カスタム項目・
 // 目標の行動項目といった「事実」を、表に書き込む形で記録する画面。
 //
 // 日記の聴取（DiaryPage）から事実の確認を切り出したのがこの画面。聴取は
 // ここに書かれた内容を読んでから、日記に書く出来事の深掘りだけを行う。
+//
+// 1項目ずつ書く代わりに、「探偵に話す」（RecordTellSheet）でまとめて話し、
+// AI に表へ振り分けさせることもできる（確認してから入れる）。
 //
 // 保存は項目ごとに即時（テキスト・数値は打ち終わりを少し待ってから）。
 // 「保存」ボタンを置かないのは、朝に睡眠だけ、夜に残りを書く、のように
@@ -65,6 +73,10 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
 
   // テキスト・数値欄のコントローラ。日付を切り替えるたびに作り直す。
   final Map<String, TextEditingController> _controllers = {};
+
+  // 「探偵に話す」で使う。開いたときに初めて作る。
+  // 振り分けは人格を使わないので、担当探偵の設定は読まずに既定のロールで作る。
+  GeminiService? _gemini;
 
   @override
   void initState() {
@@ -177,6 +189,46 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
     });
   }
 
+  // 「探偵に話す」：まとめて話した内容を表に振り分け、選んだものを入れる。
+  // 入れた値は表で手入力したのと同じ経路（_values / _pending → _flush）で保存する。
+  Future<void> _openTell() async {
+    _flush();
+    final gemini = _gemini ??= GeminiService(
+      dotenv.env['GEMINI_API_KEY'] ?? '',
+      kDefaultRoleKey,
+    );
+    final accepted = await showModalBottomSheet<Map<String, Object>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.colors.cardBg,
+      builder: (_) => RecordTellSheet(
+        fields: _rows,
+        currentValues: Map.of(_values),
+        gemini: gemini,
+      ),
+    );
+    if (accepted == null || accepted.isEmpty || !mounted) return;
+
+    setState(() {
+      for (final entry in accepted.entries) {
+        _values[entry.key] = entry.value;
+        _pending[entry.key] = entry.value;
+        // テキスト・数値欄は入力欄の文字も差し替える（表示と保存値を揃える）
+        final controller = _controllers[entry.key];
+        if (controller != null) {
+          controller.text = switch (entry.value) {
+            num v => formatNumber(v.toDouble()),
+            final v => '$v',
+          };
+        }
+      }
+    });
+    _flush();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('${accepted.length}件を表に入れた')));
+  }
+
   Future<void> _openFieldSettings() async {
     _flush();
     await Navigator.push(
@@ -246,6 +298,29 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
               onPrev: () => _moveDay(-1),
               onNext: () => _moveDay(1),
             ),
+            // 1項目ずつ書く代わりに、まとめて話して埋める入口
+            if (!_loading && _rows.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _openTell,
+                    icon: Icon(Icons.record_voice_over, color: c.gold),
+                    label: Text(
+                      '探偵に話して埋める',
+                      style: TextStyle(
+                        color: c.gold,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: c.gold),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ),
             Expanded(
               child: _loading
                   ? Center(child: CircularProgressIndicator(color: c.gold))
@@ -270,9 +345,21 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
                           for (final entry in goalRows.entries) ...[
                             const SizedBox(height: 18),
                             SectionLabel(
-                              _goalTitle(entry.key),
+                              _goalById(entry.key).title,
                               icon: Icons.flag_outlined,
                             ),
+                            // 今どの段階を追っているかを、記録する項目の上に添える
+                            if (stepLabel(_goalById(entry.key)) case final step?)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  step,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: c.textSecondary,
+                                  ),
+                                ),
+                              ),
                             const SizedBox(height: 10),
                             for (final field in entry.value) _buildRow(field),
                           ],
@@ -287,9 +374,8 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
     );
   }
 
-  String _goalTitle(String goalId) => _goals
-      .firstWhere((g) => g.id == goalId, orElse: () => const Goal())
-      .title;
+  Goal _goalById(String goalId) =>
+      _goals.firstWhere((g) => g.id == goalId, orElse: () => const Goal());
 
   Widget _buildRow(RecordField field) {
     final c = context.colors;

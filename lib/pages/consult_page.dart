@@ -11,6 +11,7 @@ import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
 import '../widgets/choice_buttons.dart';
+import '../widgets/goal_step_list.dart';
 import '../widgets/input_area.dart';
 import '../widgets/message_bubble.dart';
 
@@ -213,7 +214,10 @@ class _ConsultPageState extends State<ConsultPage> {
       );
       if (!mounted) return;
 
-      final goal = result.goal;
+      // 見直しのときは、達成済みの段階を確認中の見立てにも映しておく
+      // （保存時にも同じ引き継ぎをかけるが、同じ結果になる）
+      final proposed = result.goal;
+      final goal = proposed == null ? null : carryOverSteps(proposed, target);
       if (result.ready && goal != null) {
         _titleController.text = goal.title;
         // 既定は枠に収まるぶんだけ採用する。
@@ -258,7 +262,11 @@ class _ConsultPageState extends State<ConsultPage> {
           .where((a) => _selectedActionIds.contains(a.id))
           .toList(growable: false),
     );
-    final goal = carryOverActionIds(selected, target).copyWith(
+    // 段階は達成済みのものと同じタイトルの id・達成日を引き継ぐ（carryOverSteps の説明を参照）
+    final goal = carryOverSteps(
+      carryOverActionIds(selected, target),
+      target,
+    ).copyWith(
       // copyWith は null なら現状維持なので、新規（target が null）では
       // 見立てが持つ uuid と今日の日付がそのまま残る。
       // id を変えると保存済みの 'goal_<actionId>' の回答と対応が切れ、
@@ -621,6 +629,18 @@ class _GoalDraftCard extends StatelessWidget {
           if (goal.deadline.isNotEmpty) ...[
             const SizedBox(height: 6),
             _Labeled(label: '期限', value: goal.deadline),
+          ],
+
+          // ── 途中の段階 ────────────────────────────────────
+          if (goal.steps.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Text(
+              '途中の段階',
+              style: TextStyle(fontSize: 11, color: c.textSecondary),
+            ),
+            const SizedBox(height: 4),
+            // 見立ての段階は会話で直す（「もう少し話す」）ので、ここでは選び直させない
+            GoalStepList(steps: goal.steps),
           ],
 
           // ── 毎日追う項目 ──────────────────────────────────

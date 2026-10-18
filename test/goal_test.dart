@@ -884,4 +884,160 @@ void main() {
       expect(buildGoalQuestionQueue(many).length, kMaxTotalGoalActions);
     });
   });
+
+  // ── 段階（G1） ────────────────────────────────────────────
+  //
+  // 段階は「今どこにいるか」を示すためのもの。達成した事実が見直しで消えたり、
+  // 目標の期限を越える段階が紛れ込んだりすると、表示が静かに嘘をつく。
+  group('段階', () {
+    const s1 = GoalStep(id: 's1', title: 'まず1か月で2kg', doneAt: '2026-10-01');
+    const s2 = GoalStep(id: 's2', title: '次の1か月で2kg', deadline: '2026-11-30');
+    const s3 = GoalStep(id: 's3', title: '最後に1kg');
+    const goal = Goal(id: 'g', title: '3か月で5kg', steps: [s1, s2, s3]);
+
+    test('今の段階は、達成していない段階のうち最初のもの', () {
+      expect(goal.currentStep?.id, 's2');
+      expect(goal.doneStepCount, 1);
+      expect(const Goal(id: 'x', title: 't').currentStep, isNull);
+    });
+
+    test('今の段階を達成すると、次の段階が今の段階になる', () {
+      final next = goal.completeCurrentStep('2026-10-20');
+      expect(next.steps[1].doneAt, '2026-10-20');
+      expect(next.currentStep?.id, 's3');
+      // 元の目標は書き換えない
+      expect(goal.steps[1].isDone, isFalse);
+    });
+
+    test('全段階を達成すると今の段階は無くなり、それ以上は変わらない', () {
+      final done = goal
+          .completeCurrentStep('2026-10-20')
+          .completeCurrentStep('2026-11-20');
+      expect(done.currentStep, isNull);
+      expect(done.completeCurrentStep('2026-12-01').steps, done.steps);
+    });
+
+    test('toMap → fromMap で段階と達成日が保たれる', () {
+      final loaded = Goal.fromMap(goal.toMap());
+      expect(loaded.steps.map((s) => s.id), ['s1', 's2', 's3']);
+      expect(loaded.steps[0].doneAt, '2026-10-01');
+      expect(loaded.steps[1].deadline, '2026-11-30');
+    });
+
+    test('段階を持たない古いドキュメントも読める', () {
+      expect(Goal.fromMap(const {'id': 'g', 'title': 't'}).steps, isEmpty);
+    });
+
+    test('AI へ渡す要約に、達成済みと今の段階の印が付く', () {
+      final summary = goal.promptSummary();
+      expect(summary, contains('1. まず1か月で2kg [達成済み 2026-10-01]'));
+      expect(summary, contains('2. 次の1か月で2kg（期限 2026-11-30） [今ここ]'));
+      expect(summary, contains('3. 最後に1kg'));
+    });
+  });
+
+  group('Goal.fromAiMap の段階', () {
+    test('段階に id を振り、タイトルの無いものは捨て、上限で切る', () {
+      final goal = Goal.fromAiMap({
+        'title': '5kg減らす',
+        'steps': [
+          {'title': '  ', 'deadline': ''},
+          for (var i = 0; i < kMaxGoalSteps + 2; i++)
+            {'title': '段階$i', 'deadline': ''},
+        ],
+      }, createdAt: '2026-10-01');
+      expect(goal.steps.length, kMaxGoalSteps);
+      expect(goal.steps.first.title, '段階0');
+      expect(goal.steps.map((s) => s.id).toSet().length, kMaxGoalSteps);
+      expect(goal.steps.every((s) => !s.isDone), isTrue);
+    });
+
+    test('段階の期限は検証し、目標の期限より後のものは捨てる', () {
+      final goal = Goal.fromAiMap(const {
+        'title': '5kg減らす',
+        'deadline': '2026-12-31',
+        'steps': [
+          {'title': '過去の期限', 'deadline': '2026-09-01'},
+          {'title': '正しい期限', 'deadline': '2026-11-01'},
+          {'title': '目標より後', 'deadline': '2027-01-15'},
+          {'title': '形式違い', 'deadline': '11月末'},
+        ],
+      }, createdAt: '2026-10-01');
+      expect(goal.steps.map((s) => s.deadline), ['', '2026-11-01', '', '']);
+    });
+
+    test('steps が無い・壊れていても落ちない', () {
+      expect(
+        Goal.fromAiMap(const {
+          'title': 't',
+          'steps': 'なし',
+        }, createdAt: '2026-10-01').steps,
+        isEmpty,
+      );
+    });
+  });
+
+  group('carryOverSteps', () {
+    const previous = Goal(
+      id: 'g',
+      title: '3か月で5kg',
+      steps: [
+        GoalStep(id: 'old1', title: 'まず2kg', doneAt: '2026-10-01'),
+        GoalStep(id: 'old2', title: '次に2kg'),
+        GoalStep(id: 'old3', title: '最後に1kg'),
+      ],
+    );
+
+    test('同じタイトルの段階は id と達成日を引き継ぐ', () {
+      const draft = Goal(
+        id: 'new',
+        title: '3か月で5kg',
+        steps: [
+          GoalStep(id: 'n1', title: 'まず2kg'),
+          GoalStep(id: 'n2', title: '次に2kg'),
+        ],
+      );
+      final carried = carryOverSteps(draft, previous);
+      expect(carried.steps.map((s) => s.id), ['old1', 'old2']);
+      expect(carried.steps.first.doneAt, '2026-10-01');
+    });
+
+    test('見立てに出てこなかった達成済みの段階は先頭に残す', () {
+      const draft = Goal(
+        id: 'new',
+        title: '3か月で5kg',
+        steps: [GoalStep(id: 'n1', title: '新しい進め方で3kg')],
+      );
+      final carried = carryOverSteps(draft, previous);
+      expect(carried.steps.map((s) => s.title), ['まず2kg', '新しい進め方で3kg']);
+      expect(carried.steps.first.isDone, isTrue);
+      // 達成していない古い段階は、計画の立て直しで外れる
+      expect(carried.steps.any((s) => s.title == '次に2kg'), isFalse);
+    });
+
+    test('2回かけても結果が変わらない（確認中と保存時の両方でかけるため）', () {
+      const draft = Goal(
+        id: 'new',
+        title: '3か月で5kg',
+        steps: [GoalStep(id: 'n1', title: '新しい進め方で3kg')],
+      );
+      final once = carryOverSteps(draft, previous);
+      final twice = carryOverSteps(once, previous);
+      expect(twice.steps.map((s) => s.id), once.steps.map((s) => s.id));
+      expect(twice.steps.map((s) => s.doneAt), once.steps.map((s) => s.doneAt));
+    });
+
+    test('見直し前が無い・段階が無ければそのまま', () {
+      const draft = Goal(
+        id: 'new',
+        title: 't',
+        steps: [GoalStep(id: 'n1', title: 'a')],
+      );
+      expect(carryOverSteps(draft, null).steps.single.id, 'n1');
+      expect(
+        carryOverSteps(draft, const Goal(id: 'g', title: 't')).steps.single.id,
+        'n1',
+      );
+    });
+  });
 }

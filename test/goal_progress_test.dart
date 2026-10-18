@@ -215,6 +215,34 @@ void main() {
     });
   });
 
+  group('stepLabel', () {
+    test('今の段階を「段階 n/全体：タイトル（期限）」で出す', () {
+      const goal = Goal(
+        id: 'g',
+        title: '3か月で5kg',
+        steps: [
+          GoalStep(id: 'a', title: 'まず2kg', doneAt: '2026-10-01'),
+          GoalStep(id: 'b', title: '次に2kg', deadline: '2026-11-30'),
+          GoalStep(id: 'c', title: '最後に1kg'),
+        ],
+      );
+      expect(stepLabel(goal), '段階 2/3：次に2kg（期限 2026-11-30）');
+    });
+
+    test('全段階を達成していればそう出す', () {
+      const goal = Goal(
+        id: 'g',
+        title: 't',
+        steps: [GoalStep(id: 'a', title: 'a', doneAt: '2026-10-01')],
+      );
+      expect(stepLabel(goal), '全1段階を達成');
+    });
+
+    test('段階を持たない目標は null（何も出さない）', () {
+      expect(stepLabel(const Goal(id: 'g', title: 't')), isNull);
+    });
+  });
+
   group('elapsedLabel', () {
     final today = DateTime(2026, 9, 20);
 

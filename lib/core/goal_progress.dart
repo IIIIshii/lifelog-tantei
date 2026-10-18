@@ -131,6 +131,19 @@ Set<String> goalsRecordedIn(
     if (hasAnswerForGoal(record, goal)) goal.id,
 };
 
+/// 「段階 2/3：まず1か月で2kg（期限 2026-11-15）」の1行。段階を持たない目標は null。
+/// 全段階を達成していれば「全3段階を達成」。
+///
+/// ホーム・相談室・記録の表・分析室が同じ文面を出すため、ここに1本化している。
+String? stepLabel(Goal goal) {
+  if (goal.steps.isEmpty) return null;
+  final current = goal.currentStep;
+  if (current == null) return '全${goal.steps.length}段階を達成';
+  final index = goal.steps.indexOf(current) + 1;
+  final deadline = current.deadline.isEmpty ? '' : '（期限 ${current.deadline}）';
+  return '段階 $index/${goal.steps.length}：${current.title}$deadline';
+}
+
 /// 「着手から n 日 / 期限 YYYY-MM-DD」の1行。
 ///
 /// createdAt を持たない古い目標では経過を出さない ―― 着手日が分からないものを

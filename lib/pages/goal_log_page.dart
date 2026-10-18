@@ -7,6 +7,7 @@ import '../core/theme/detective_text_styles.dart';
 import '../models/goal.dart';
 import '../models/record_field.dart';
 import '../services/firestore_service.dart';
+import '../widgets/goal_step_list.dart';
 import '../widgets/section_label.dart';
 import 'record_sheet_page.dart';
 
@@ -211,6 +212,13 @@ class _GoalLogPageState extends State<GoalLogPage> {
                 height: 1.4,
               ),
             ),
+          ],
+          // 段階の全体。どこまで来て、次に何があるかをここで見渡す
+          if (goal.steps.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: c.cardBorder),
+            const SizedBox(height: 8),
+            GoalStepList(steps: goal.steps),
           ],
         ],
       ),

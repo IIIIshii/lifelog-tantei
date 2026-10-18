@@ -78,6 +78,34 @@ class DiaryPrompts {
     return '依頼人が話したい出来事：$topic$record';
   }
 
+  // 話した内容を記録の表へ振り分けるプロンプト。
+  //
+  // 項目は extractionKey（f0, f1, …）で示し、返答も同じキーで受ける。
+  // 型ごとに何を入れればよいかを添えるのは、返させる形（responseSchema）だけでは
+  // 「単位」「選択肢の意味」が伝わらないため。
+  static String buildRecordExtractionPrompt({
+    required List<RecordField> fields,
+    required String text,
+  }) {
+    final buffer = StringBuffer()..writeln('【記録の項目】');
+    for (var i = 0; i < fields.length; i++) {
+      final field = fields[i];
+      final how = switch (field.kind) {
+        FieldKind.numeric =>
+          field.unit.isEmpty ? '数値' : '数値・単位は${field.unit}',
+        FieldKind.yesNo => field.isGoal ? 'はい／いいえ（やったかどうか）' : 'はい／いいえ',
+        FieldKind.choice => '選択肢: ${field.choices.join(' / ')}',
+        FieldKind.text => '短い文章',
+      };
+      buffer.writeln('- ${extractionKey(i)}: ${field.promptLabel}（$how）');
+    }
+    buffer
+      ..writeln()
+      ..writeln('【依頼人の話】')
+      ..write(text.trim());
+    return buffer.toString();
+  }
+
   // 直近期間の事件簿群を解析するプロンプトを組み立てる。
   // days は mergeDays の結果（(YYYY-MM-DD, {values, diary})）。日付順は問わない。
   // fields: 値のキー → 記録項目（fieldIndex の結果）。ここに無いキーの値は渡さない。

@@ -56,7 +56,9 @@ flutter test test/widget_test.dart
 聴取は「出来事を選ぶ → 深掘り」を何度でも繰り返し、最後に1日1件の日記本文にまとめる。
 記録があれば読み込んで、話題の候補出しと日記の材料に使う。
 ホームの FAB は「日々の記録（未記入があれば）→ 聴取」の順に開く。
-日々の記録の対話入力は未実装（Role の q_* はそのための文面）。
+表は「探偵に話す」（RecordTellSheet）でまとめて話して埋めることもできる。AI が項目へ振り分けた
+結果は下書きとして確認してから入れ、既に値がある項目は勝手に上書きしない。
+一問一答の対話入力は未実装（Role の q_* はそのための文面）。
 
 **Initialization order in `main()`:**
 1. `WidgetsFlutterBinding.ensureInitialized()` — must come first (required before any MethodChannel/platform call)
@@ -89,10 +91,12 @@ users/{uid}/
 ├ diaries/{YYYY-MM-DD}                  ← 日記（1日1件）
 │   text / topics[]（聴取で話した出来事）/ role / mode('interview'|'manual') / updatedAt
 │   └ interview/{autoId}  role / text / order / topic / timestamp
-├ analyses/latest, analyses/today        ← AI所見・今日のコメント
+├ analyses/{autoId}                      ← AI所見・今日のコメント（上書きせず積む）
+│   kind('period'|'daily') / text / date / periodDays / generatedAt
 ├ self-analysis/profile                  ← SelfAnalysis
 └ goals/{goalId}                         ← 目標（追跡を終えても消さない）
     id / title / metric / deadline / actions[] / suggestedQuestions[] / createdAt
+    steps[]: id / title / deadline / doneAt（途中の段階。順番どおり。今の段階＝未達成の先頭）
     status: 'active' | 'solved' | 'abandoned' | 'closed'
     closedAt: 'YYYY-MM-DD'（追跡中は空文字）
 ```

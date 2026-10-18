@@ -123,6 +123,42 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
     );
   }
 
+  // 今の段階を達成済みにする。押し間違えても戻せるよう、スナックバーに取り消しを出す
+  // （確認ダイアログを挟まないのは、段階の達成は追跡をやめるほど重い操作ではないため）。
+  Future<void> _completeStep(Goal goal) async {
+    final step = goal.currentStep;
+    if (step == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final updated = goal.completeCurrentStep(dateKey(DateTime.now()));
+    try {
+      await _firestore.saveGoal(widget.uid, updated);
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('段階を記録できなかった: $e')));
+      return;
+    }
+    if (!mounted) return;
+    await _load();
+    final allDone = updated.currentStep == null;
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          allDone
+              ? '全ての段階を達成した。事件を閉じるなら「解決した」を押してくれ'
+              : '「${step.title}」を達成した',
+        ),
+        action: SnackBarAction(
+          label: '取り消す',
+          // 押す前の目標をそのまま書き戻す
+          onPressed: () async {
+            await _firestore.saveGoal(widget.uid, goal);
+            if (mounted) await _load();
+          },
+        ),
+      ),
+    );
+  }
+
   // 追跡を終える。閉じたものは「解決済みの事件」へ移る。
   //
   // 断念の文面を責める調子にしないのは、ホームがストリークの途切れを
@@ -240,6 +276,10 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
                 ),
                 _GoalActions(
                   onRevise: () => _openConsult(target: goal),
+                  // 段階を持たない目標・全段階を達成した目標には出さない
+                  onStepDone: goal.currentStep == null
+                      ? null
+                      : () => _completeStep(goal),
                   onSolved: () => _closeGoal(goal, GoalStatus.solved),
                   onAbandoned: () => _closeGoal(goal, GoalStatus.abandoned),
                 ),
@@ -301,7 +341,7 @@ class _NoticeCard extends StatelessWidget {
   }
 }
 
-// 事件カードの下に並べる操作。見立てを見直す・解決した・断念した の3つ。
+// 事件カードの下に並べる操作。見立てを見直す・段階を達成した・解決した・断念した。
 //
 // bottom sheet のメニューをやめてボタンにしたのは、何ができるのかが
 // 一覧を見た時点で分かるようにするため（長押しやメニューは画面に手がかりが残らない）。
@@ -310,11 +350,15 @@ class _NoticeCard extends StatelessWidget {
 // コントラスト検証に判断が増える。色を分けなくても、解決と並べば区別は付く。
 class _GoalActions extends StatelessWidget {
   final VoidCallback onRevise;
+
+  /// 今の段階を達成済みにする。今の段階が無ければ null（ボタンを出さない）。
+  final VoidCallback? onStepDone;
   final VoidCallback onSolved;
   final VoidCallback onAbandoned;
 
   const _GoalActions({
     required this.onRevise,
+    required this.onStepDone,
     required this.onSolved,
     required this.onAbandoned,
   });
@@ -333,6 +377,13 @@ class _GoalActions extends StatelessWidget {
             color: c.gold,
             onTap: onRevise,
           ),
+          if (onStepDone != null)
+            _ActionButton(
+              icon: Icons.stairs_outlined,
+              label: '段階を達成した',
+              color: c.gold,
+              onTap: onStepDone!,
+            ),
           _ActionButton(
             icon: Icons.verified_outlined,
             label: '解決した',

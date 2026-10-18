@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../core/streak.dart';
+import '../models/analysis_entry.dart';
 import '../models/goal.dart';
 import '../models/record_field.dart';
 import '../models/self_analysis.dart';
@@ -17,7 +18,7 @@ import '../models/user_settings.dart';
 // ├ diaries/{YYYY-MM-DD}   日記の本文・話した出来事
 // │   └ interview/{autoId} 聴取の会話
 // ├ goals/{goalId}         目標（行動項目の定義を持つ。値は records に入る）
-// ├ analyses/latest, today AI所見・今日のコメント
+// ├ analyses/{autoId}      AI所見・今日のコメント（上書きせず積む）
 // └ self-analysis/profile  自己分析
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -289,32 +290,36 @@ class FirestoreService {
   });
 
   // ──────────────────────────────────────────────────────────────
-  // AI所見・今日のコメント
+  // AI所見・今日のコメント（analyses/{autoId} に積む）
   // ──────────────────────────────────────────────────────────────
 
-  // 最新のAI所見キャッシュを取得する（未生成なら null を返す）
-  // ドキュメントは {text, generatedAt, periodDays} の形式で保存される
-  Future<Map<String, dynamic>?> getLatestAnalysis(String uid) =>
-      _doc(_user(uid).collection('analyses').doc('latest'));
-
-  // AI所見テキストを analyses/latest に上書き保存する
-  Future<void> saveAnalysis(String uid, String text) =>
-      _user(uid).collection('analyses').doc('latest').set({
-        'text': text,
-        'periodDays': 14,
+  // 所見を1件足す。上書きはしない（過去の所見を読み返せるようにするため）。
+  Future<void> addAnalysis(String uid, AnalysisEntry entry) =>
+      _user(uid).collection('analyses').add({
+        ...entry.toMap(),
         'generatedAt': FieldValue.serverTimestamp(),
       });
 
-  // 今日のAIコメントキャッシュを取得する（未生成なら null を返す）
-  Future<Map<String, dynamic>?> getTodayComment(String uid) =>
-      _doc(_user(uid).collection('analyses').doc('today'));
-
-  // 今日のAIコメントを analyses/today に上書き保存する
-  Future<void> saveTodayComment(String uid, String text) =>
-      _user(uid).collection('analyses').doc('today').set({
-        'text': text,
-        'generatedAt': FieldValue.serverTimestamp(),
-      });
+  // 所見を新しい順に返す。種類（所見／今日のコメント）での絞り込みは呼び出し側で行う。
+  //
+  // where(kind) と orderBy(generatedAt) を組み合わせないのは、複合インデックスを
+  // コンソールで作る手間を避けるため。1人ぶんの所見なら、新しい順に取って
+  // 手元で振り分けても量は知れている。種類の読めない古いドキュメントは捨てる。
+  Future<List<AnalysisEntry>> getAnalyses(String uid, {int limit = 50}) async {
+    final snap = await _user(uid)
+        .collection('analyses')
+        .orderBy('generatedAt', descending: true)
+        .limit(limit)
+        .get();
+    return [
+      for (final doc in snap.docs)
+        ?AnalysisEntry.fromMap(
+          doc.id,
+          doc.data(),
+          generatedAt: (doc.data()['generatedAt'] as Timestamp?)?.toDate(),
+        ),
+    ];
+  }
 
   // ──────────────────────────────────────────────────────────────
   // 自己分析

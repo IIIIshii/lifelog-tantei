@@ -74,6 +74,29 @@ void main() {
     });
   });
 
+  group('buildRecordExtractionPrompt', () {
+    test('項目を番号のキーで並べ、型ごとの入れ方と話した内容を渡す', () {
+      final prompt = DiaryPrompts.buildRecordExtractionPrompt(
+        fields: [
+          fields[kSleepFieldId]!,
+          const RecordField(
+            id: kMoodFieldId,
+            label: '今日の気分',
+            kind: FieldKind.choice,
+            choices: ['良い', 'ふつう'],
+          ),
+          fields['goal_a1']!,
+        ],
+        text: '  7時間寝た。ジムにも行った  ',
+      );
+      expect(prompt, contains('- f0: 睡眠時間（数値・単位は時間）'));
+      expect(prompt, contains('- f1: 今日の気分（選択肢: 良い / ふつう）'));
+      expect(prompt, contains('- f2: 目標「5kg減らす」の「ジムに行く」'));
+      expect(prompt, contains('7時間寝た。ジムにも行った'));
+      expect(prompt, isNot(contains('custom_')));
+    });
+  });
+
   group('聴取', () {
     test('話題の候補出しに記録・既に話した出来事を渡す', () {
       final prompt = DiaryPrompts.buildTopicPrompt(

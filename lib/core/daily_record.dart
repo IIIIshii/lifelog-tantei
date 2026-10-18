@@ -182,6 +182,49 @@ String recordSummary(
   return lines.join('\n');
 }
 
+// ──────────────────────────────────────────────────────────────
+// 話した内容を表に振り分ける（「探偵に話す」）
+// ──────────────────────────────────────────────────────────────
+
+/// 振り分けで AI に項目を渡すときのキー。表の並び順の番号で 'f0', 'f1', … とする。
+///
+/// 項目 id をそのまま使わないのは、カスタム項目の id に uuid（ハイフン入り）が入り、
+/// AI に返させる形のキーとして扱いにくいため。番号から id へは呼び出し側の並びで戻す。
+String extractionKey(int index) => 'f$index';
+
+/// 振り分けの提案1件。current はその項目に今入っている値（空なら null）。
+typedef RecordProposal = ({RecordField field, Object value, Object? current});
+
+/// AI の返答（extractionKey → 生の値）を、表に入れられる提案の一覧にする。
+///
+/// 値は normalizeInput を通す。型の合わない値（はい／いいえ欄の文字列、
+/// 選択肢に無い値など）は記録として成り立たないので提案にしない。
+/// 今入っている値と同じものも出さない（変わらない提案は確認の手間になるだけのため）。
+/// 並びは表の順に揃える。
+List<RecordProposal> proposalsFromExtraction(
+  List<RecordField> fields,
+  Map<String, dynamic> raw,
+  Map<String, Object?> currentValues,
+) {
+  final proposals = <RecordProposal>[];
+  for (var i = 0; i < fields.length; i++) {
+    final field = fields[i];
+    final value = normalizeInput(field, raw[extractionKey(i)]);
+    if (value == null) continue;
+    final current = currentValues[field.id];
+    final currentFilled = isFilled(current) ? current : null;
+    if (_sameValue(value, currentFilled)) continue;
+    proposals.add((field: field, value: value, current: currentFilled));
+  }
+  return proposals;
+}
+
+// 数値は int と double を同じ値として扱う（7 と 7.0 を別物にしない）
+bool _sameValue(Object a, Object? b) {
+  if (a is num && b is num) return a.toDouble() == b.toDouble();
+  return a == b;
+}
+
 /// 話題の候補を AI が出せなかったときの代わり。記録のテキスト項目に書かれた
 /// 内容（「近所のカフェで本を読んだ」など）をそのまま見出しにする。
 ///

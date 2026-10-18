@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -10,16 +9,19 @@ import '../core/goal_progress.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
+import '../models/analysis_entry.dart';
 import '../models/goal.dart';
 import '../models/record_field.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
+import 'analysis_history_page.dart';
 
 // 証拠分析室：日々の記録と日記をグラフ・表・AIの所見で読み返す。
 //
 // 事件簿タブ（CaseFilesPage）の「分析」側の中身。AppBar はタブ側が持つので、
 // ここは本文だけを返す。この画面が自分で持つデータは AI の所見（analyses）だけで、
 // 他は records / diaries / 記録の型 / 目標を読むだけ。
+// 所見は上書きせずに積み、過去のものは AnalysisHistoryPage で読み返す。
 class AnalyticsView extends StatefulWidget {
   final String uid;
 
@@ -87,17 +89,23 @@ class _AnalyticsViewState extends State<AnalyticsView>
       final fieldsFuture = _firestore.getFields(uid);
       final goalsFuture = _firestore.getGoals(uid);
       final settingsFuture = _firestore.getUserSettings(uid);
-      final analysisFuture = _firestore.getLatestAnalysis(uid);
-      final dailyCommentFuture = _firestore.getTodayComment(uid);
+      // 最新の所見と今日のコメントを出すのに、新しいものから少しだけ読めば足りる
+      final analysesFuture = _firestore.getAnalyses(uid, limit: 20);
       final selfAnalysisFuture = _firestore.getSelfAnalysis(uid);
       final records = await recordsFuture;
       final diaries = await diariesFuture;
       final fields = await fieldsFuture;
       final goals = await goalsFuture;
       final settings = await settingsFuture;
-      final analysis = await analysisFuture;
-      final dailyComment = await dailyCommentFuture;
+      final analyses = await analysesFuture;
       final selfAnalysis = await selfAnalysisFuture;
+      final latest = latestAnalysis(analyses, AnalysisKind.period);
+      // 今日のコメントは今日書いたものだけ（日が変わったら古いので出さない）
+      final today = latestAnalysis(
+        analyses,
+        AnalysisKind.daily,
+        onDate: dateKey(DateTime.now()),
+      );
 
       // 自己分析は共有トグルの判定ごと GeminiService に委ねる。
       // OFF なら所見・今日のコメントのどちらにも差し込まれない。
@@ -115,21 +123,10 @@ class _AnalyticsViewState extends State<AnalyticsView>
         _goals = goals;
         _fieldIndex = fieldIndex(fields, goals);
         _summary = _AnalyticsSummary.from(records, diaries, _dateRange);
-        if (analysis != null) {
-          _analysisText = analysis['text'] as String?;
-          final ts = analysis['generatedAt'];
-          if (ts is Timestamp) _analysisGeneratedAt = ts.toDate();
-        }
-        _dailyAnalysisText = null;
-        _dailyAnalysisGeneratedAt = null;
-        if (dailyComment != null) {
-          final ts = dailyComment['generatedAt'];
-          // 日付が変わっていれば古いキャッシュなので表示しない
-          if (ts is Timestamp && dateKey(ts.toDate()) == dateKey(DateTime.now())) {
-            _dailyAnalysisText = dailyComment['text'] as String?;
-            _dailyAnalysisGeneratedAt = ts.toDate();
-          }
-        }
+        _analysisText = latest?.text;
+        _analysisGeneratedAt = latest?.generatedAt;
+        _dailyAnalysisText = today?.text;
+        _dailyAnalysisGeneratedAt = today?.generatedAt;
         _isLoading = false;
       });
     } catch (_) {
@@ -163,7 +160,16 @@ class _AnalyticsViewState extends State<AnalyticsView>
     setState(() => _isGeneratingAnalysis = true);
     try {
       final text = await gemini.generateAnalysis(days, fields: _fieldIndex);
-      await _firestore.saveAnalysis(widget.uid, text);
+      await _firestore.addAnalysis(
+        widget.uid,
+        AnalysisEntry(
+          id: '',
+          kind: AnalysisKind.period,
+          text: text,
+          date: dateKey(DateTime.now()),
+          periodDays: _days,
+        ),
+      );
       if (!mounted) return;
       setState(() {
         _analysisText = text;
@@ -203,7 +209,15 @@ class _AnalyticsViewState extends State<AnalyticsView>
         days,
         fields: _fieldIndex,
       );
-      await _firestore.saveTodayComment(widget.uid, text);
+      await _firestore.addAnalysis(
+        widget.uid,
+        AnalysisEntry(
+          id: '',
+          kind: AnalysisKind.daily,
+          text: text,
+          date: todayKey,
+        ),
+      );
       if (!mounted) return;
       setState(() {
         _dailyAnalysisText = text;
@@ -277,7 +291,24 @@ class _AnalyticsViewState extends State<AnalyticsView>
               isLoading: _isGeneratingDailyAnalysis,
               onGenerate: _generateDailyAnalysis,
             ),
-            const SizedBox(height: 32),
+            // 所見は上書きせず積んでいるので、過去のものを読み返せる
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => AnalysisHistoryPage(uid: widget.uid),
+                  ),
+                ),
+                icon: Icon(Icons.history, size: 16, color: c.gold),
+                label: Text(
+                  '過去の所見を読む',
+                  style: TextStyle(fontSize: 12, color: c.gold),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
             _SectionHeader(title: 'サマリー', subtitle: '直近$_days日間'),
             const SizedBox(height: 16),
             _SummaryCards(summary: _summary),
@@ -758,6 +789,13 @@ class _GoalProgressSection extends StatelessWidget {
           elapsedLabel(goal, DateTime.now()),
           style: TextStyle(fontSize: 11, color: c.textSecondary),
         ),
+        if (stepLabel(goal) case final step?) ...[
+          const SizedBox(height: 4),
+          Text(
+            step,
+            style: TextStyle(fontSize: 12, color: c.textPrimary, height: 1.4),
+          ),
+        ],
         const SizedBox(height: 14),
         if (goal.actions.isEmpty)
           const _EmptyCard(message: '毎日記録する項目は設定されていない')

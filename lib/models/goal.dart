@@ -36,6 +36,10 @@ const String kGoalNotDone = '未達';
 const int kMaxGoalActions = 3;
 const int kMaxGoalQuestions = 5;
 
+// AI の見立てから受け取る段階の上限。
+// 段階が多すぎると「今どこにいるか」が一目で分からなくなるため、提案の時点で絞る。
+const int kMaxGoalSteps = 5;
+
 // 同時に追える事件の数。
 // 3件を超えると毎日答える項目が増えるだけでなく、「今日はどれを進めるのか」が
 // ホームのカード一画面ぶんで判断できなくなる。
@@ -206,6 +210,50 @@ class GoalAction {
 }
 
 // ──────────────────────────────────────────────────────────────
+// 段階1件（「3か月で5kg」に対する「まず1か月で2kg」など）
+//
+// 段階は目標のドキュメントの中に順番どおりの配列で持つ。
+// 毎日記録する項目（actions）は段階ごとには持たず、目標が持ったまま
+// （段階が進んでも記録の型が変わらないので、過去の記録と繋がったままになる）。
+// ──────────────────────────────────────────────────────────────
+class GoalStep {
+  final String id; // uuid v4。見直しで同じ段階を引き継ぐときの目印
+  final String title;
+  final String deadline; // 'YYYY-MM-DD'。決めていなければ空文字
+  final String doneAt; // 達成した日 'YYYY-MM-DD'。まだなら空文字
+
+  const GoalStep({
+    required this.id,
+    required this.title,
+    this.deadline = '',
+    this.doneAt = '',
+  });
+
+  bool get isDone => doneAt.isNotEmpty;
+
+  factory GoalStep.fromMap(Map<String, dynamic> map) => GoalStep(
+    id: map['id'] as String? ?? '',
+    title: map['title'] as String? ?? '',
+    deadline: map['deadline'] as String? ?? '',
+    doneAt: map['doneAt'] as String? ?? '',
+  );
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'title': title,
+    'deadline': deadline,
+    'doneAt': doneAt,
+  };
+
+  GoalStep copyWith({String? id, String? doneAt}) => GoalStep(
+    id: id ?? this.id,
+    title: title,
+    deadline: deadline,
+    doneAt: doneAt ?? this.doneAt,
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
 // 目標1件
 // ──────────────────────────────────────────────────────────────
 class Goal {
@@ -214,6 +262,7 @@ class Goal {
   final String metric; // 達成の判定基準（どうなったら解決なのか）
   final String deadline; // 'YYYY-MM-DD'。期限を決めなかった場合は空文字
   final List<GoalAction> actions; // 日々の記録に差し込む行動項目
+  final List<GoalStep> steps; // 途中の段階（順番どおり）。区切らない目標は空
   final List<String> suggestedQuestions; // AIが提案した記録項目（問い）の候補（未承認のもの）
   final String createdAt; // 'YYYY-MM-DD'。経過日数の起点
 
@@ -233,6 +282,7 @@ class Goal {
     this.metric = '',
     this.deadline = '',
     this.actions = const [],
+    this.steps = const [],
     this.suggestedQuestions = const [],
     this.createdAt = '',
     this.status = GoalStatus.active,
@@ -292,15 +342,45 @@ class Goal {
       }
     }
 
+    final deadline = _validDeadline(
+      (map['deadline'] as String?)?.trim() ?? '',
+      createdAt,
+    );
+
+    // 段階の期限は目標の期限と同じ検証を通し、目標の期限より後のものは捨てる
+    // （最終の期限を越える途中の段階は、見立てとして筋が通らないため）。
+    // タイトルの無い段階は「今どこにいるか」を示せないので捨てる。
+    final steps = <GoalStep>[];
+    final rawSteps = map['steps'];
+    if (rawSteps is List) {
+      for (final raw in rawSteps) {
+        if (raw is! Map) continue;
+        final item = Map<String, dynamic>.from(raw);
+        final title = (item['title'] as String?)?.trim() ?? '';
+        if (title.isEmpty) continue;
+        var stepDeadline = _validDeadline(
+          (item['deadline'] as String?)?.trim() ?? '',
+          createdAt,
+        );
+        if (stepDeadline.isNotEmpty &&
+            deadline.isNotEmpty &&
+            stepDeadline.compareTo(deadline) > 0) {
+          stepDeadline = '';
+        }
+        steps.add(
+          GoalStep(id: const Uuid().v4(), title: title, deadline: stepDeadline),
+        );
+        if (steps.length >= kMaxGoalSteps) break;
+      }
+    }
+
     return Goal(
       id: const Uuid().v4(),
       title: (map['title'] as String?)?.trim() ?? '',
       metric: (map['metric'] as String?)?.trim() ?? '',
-      deadline: _validDeadline(
-        (map['deadline'] as String?)?.trim() ?? '',
-        createdAt,
-      ),
+      deadline: deadline,
       actions: actions,
+      steps: steps,
       suggestedQuestions: questions,
       createdAt: createdAt,
     );
@@ -321,6 +401,13 @@ class Goal {
               )
               .toList() ??
           const [],
+      steps:
+          (map['steps'] as List<dynamic>?)
+              ?.whereType<Map>()
+              .map((e) => GoalStep.fromMap(Map<String, dynamic>.from(e)))
+              .where((step) => step.title.isNotEmpty)
+              .toList() ??
+          const [],
       suggestedQuestions:
           (map['suggestedQuestions'] as List<dynamic>?)
               ?.whereType<String>()
@@ -338,6 +425,7 @@ class Goal {
     'metric': metric,
     'deadline': deadline,
     'actions': actions.map((a) => a.toMap()).toList(),
+    'steps': steps.map((s) => s.toMap()).toList(),
     'suggestedQuestions': suggestedQuestions,
     'createdAt': createdAt,
     'status': goalStatusTo(status),
@@ -351,6 +439,7 @@ class Goal {
     String? metric,
     String? deadline,
     List<GoalAction>? actions,
+    List<GoalStep>? steps,
     List<String>? suggestedQuestions,
     String? createdAt,
     GoalStatus? status,
@@ -362,6 +451,7 @@ class Goal {
       metric: metric ?? this.metric,
       deadline: deadline ?? this.deadline,
       actions: actions ?? this.actions,
+      steps: steps ?? this.steps,
       suggestedQuestions: suggestedQuestions ?? this.suggestedQuestions,
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
@@ -374,8 +464,33 @@ class Goal {
   // （行動項目や期限は無くても「何を目指しているか」は成立する）。
   bool get isEmpty => title.trim().isEmpty;
 
-  // まだ追っているか。毎日の質問に出すか、ホーム・相談室の「追跡中」に並べるかの判定に使う。
+  // まだ追っているか。毎日の記録に項目を出すか、ホーム・相談室の「追跡中」に並べるかの判定に使う。
   bool get isActive => status == GoalStatus.active;
+
+  // 今取り組んでいる段階。達成していない段階のうち最初のもの。
+  // 段階を持たない目標・全段階を達成した目標は null。
+  GoalStep? get currentStep {
+    for (final step in steps) {
+      if (!step.isDone) return step;
+    }
+    return null;
+  }
+
+  // 達成した段階の数
+  int get doneStepCount => steps.where((s) => s.isDone).length;
+
+  // 今の段階を達成済みにした目標を返す。今の段階が無ければそのまま返す。
+  // today は 'YYYY-MM-DD'（日付の生成は呼び出し側の責務。テストで固定できるように）。
+  Goal completeCurrentStep(String today) {
+    final current = currentStep;
+    if (current == null) return this;
+    return copyWith(
+      steps: [
+        for (final step in steps)
+          step.id == current.id ? step.copyWith(doneAt: today) : step,
+      ],
+    );
+  }
 
   // 他に追っている目標を1行で表す。
   // 相談室で「同じ狙いの事件を重ねて立てない」ための文脈として AI へ渡す。
@@ -450,6 +565,19 @@ class Goal {
     if (actions.isNotEmpty) {
       lines.add('- 日々追っている項目:');
       lines.addAll(actions.map((a) => '  ${a.promptLine()}'));
+    }
+    if (steps.isNotEmpty) {
+      // 見直しのときに AI が達成済みの段階を消したり作り直したりしないよう、状態も渡す
+      final current = currentStep;
+      lines.add('- 段階:');
+      for (var i = 0; i < steps.length; i++) {
+        final step = steps[i];
+        final deadline = step.deadline.isEmpty ? '' : '（期限 ${step.deadline}）';
+        final state = step.isDone
+            ? ' [達成済み ${step.doneAt}]'
+            : (step.id == current?.id ? ' [今ここ]' : '');
+        lines.add('  ${i + 1}. ${step.title}$deadline$state');
+      }
     }
     return lines.join('\n');
   }
@@ -573,6 +701,33 @@ Goal carryOverActionIds(Goal draft, Goal? previous) {
 // 引き継ぎの一致判定に使うキー。ラベルに現れない NUL で型と繋ぐ。
 String _carryKey(GoalAction action) =>
     '${goalActionTypeTo(action.type)}\u0000${action.label}';
+
+// 見立て直した目標の段階に、見直す前の段階の id と達成日を引き継ぐ。
+//
+// 同じタイトルの段階は同じ段階とみなし、id と達成日をそのまま受け継ぐ。
+// 見立てに出てこなかった「達成済み」の段階は、新しい段階の前に残す
+// ―― AI が過去の段階を書き落としても、達成した事実まで消えないようにするため。
+// まだ達成していない段階は、見立てに無ければ外れる（計画を立て直したということ）。
+Goal carryOverSteps(Goal draft, Goal? previous) {
+  if (previous == null || previous.steps.isEmpty) return draft;
+
+  final byTitle = <String, GoalStep>{
+    for (final step in previous.steps) step.title: step,
+  };
+  final draftTitles = {for (final step in draft.steps) step.title};
+
+  return draft.copyWith(
+    steps: [
+      for (final step in previous.steps)
+        if (step.isDone && !draftTitles.contains(step.title)) step,
+      for (final step in draft.steps)
+        if (byTitle[step.title] case final old?)
+          step.copyWith(id: old.id, doneAt: old.doneAt)
+        else
+          step,
+    ],
+  );
+}
 
 // その日付の記録で行動項目を聞くべき目標だけを返す。
 //
