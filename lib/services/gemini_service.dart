@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import '../core/daily_record.dart';
 import '../models/goal.dart';
+import '../models/record_field.dart';
 import '../models/self_analysis.dart';
 import '../prompts/ai_instructions.dart';
 import '../prompts/diary_prompts.dart';
@@ -8,26 +10,30 @@ import '../prompts/goal_prompts.dart';
 import '../roles/roles.dart';
 
 // Gemini APIとのやり取りを担当するサービスクラス。
-// インタビュー用と日記生成用でモデルを分け、それぞれに専用のシステム指示をセットする。
+// 用途ごとにモデルを分け、それぞれに専用のシステム指示をセットする。
 class GeminiService {
-  // インタビュアーキャラクターとしてのシステム指示を持つモデル
+  // 聴取の深掘り質問を返すモデル（{sufficient, question} の構造化出力）
   final GenerativeModel _interviewModel;
+  // 出来事への最初の質問を返すモデル。人格はインタビュアーと同じ、プレーンテキスト出力。
+  final GenerativeModel _questionModel;
+  // その日の記録から日記に書く出来事の候補を挙げるモデル（人格なし）
+  final GenerativeModel _topicModel;
   // 日記生成ルールのシステム指示を持つモデル
   final GenerativeModel _diaryModel;
-  // 過去エントリ群を読み返して所見を出すモデル
+  // 過去の記録群を読み返して所見を出すモデル
   final GenerativeModel _analysisModel;
-  // 自由記述への短いリアクション（相槌）を返すモデル。プレーンテキスト出力。
-  final GenerativeModel _reactionModel;
-  // 過去ログを読み、今日の日記を書くための質問リストを返すモデル。
-  final GenerativeModel _memoryQuestionModel;
   // 相談室で目標を詰めるモデル。返答と見立てを構造化して返す。
   final GenerativeModel _consultModel;
 
   final String _role;
 
+  // 記録の振り分けは項目ごとに返させる形が変わるので、呼び出しのたびにモデルを作る。
+  // そのために API キーを持っておく。
+  final String _apiKey;
+
   // 自己分析（MBTI等）を systemInstruction の末尾へ差し込むためのブロック。
   // 初期化子リストでは計算ができないため、factory で組み立ててから private コンストラクタへ渡す。
-  // selfAnalysis を省略した場合は従来どおり何も差し込まれない。
+  // selfAnalysis を省略した場合は何も差し込まれない。
   factory GeminiService(
     String apiKey,
     String role, {
@@ -56,6 +62,7 @@ class GeminiService {
     String interviewProfile,
     String analysisProfile,
   ) : _role = role,
+      _apiKey = apiKey,
       _interviewModel = GenerativeModel(
         model: 'gemini-2.5-flash',
         apiKey: apiKey,
@@ -77,6 +84,31 @@ class GeminiService {
           ),
         ),
       ),
+      _questionModel = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: apiKey,
+        systemInstruction: Content.system(
+          '${roleFor(role).interviewerInstruction}$interviewProfile',
+        ),
+      ),
+      // 候補はボタンの文言として画面に出るので、自己分析も人格も渡さない
+      _topicModel = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: apiKey,
+        systemInstruction: Content.system(AiInstructions.topicPicker()),
+        generationConfig: GenerationConfig(
+          responseMimeType: 'application/json',
+          responseSchema: Schema.object(
+            properties: {
+              'topics': Schema.array(
+                items: Schema.string(description: '出来事の見出し（20字以内）'),
+                description: '日記に書く出来事の候補（3〜4件）',
+              ),
+            },
+            requiredProperties: ['topics'],
+          ),
+        ),
+      ),
       _diaryModel = GenerativeModel(
         model: 'gemini-2.5-flash',
         apiKey: apiKey,
@@ -89,33 +121,6 @@ class GeminiService {
         apiKey: apiKey,
         systemInstruction: Content.system(
           '${AiInstructions.analyst(roleFor(role).analystStyle)}$analysisProfile',
-        ),
-      ),
-      // インタビュアーと同じ人格指示だが、JSON構造化はせずプレーンテキストで相槌を返す
-      _reactionModel = GenerativeModel(
-        model: 'gemini-2.5-flash',
-        apiKey: apiKey,
-        systemInstruction: Content.system(
-          '${roleFor(role).interviewerInstruction}$interviewProfile',
-        ),
-      ),
-      _memoryQuestionModel = GenerativeModel(
-        model: 'gemini-2.5-flash',
-        apiKey: apiKey,
-        systemInstruction: Content.system(
-          '${roleFor(role).interviewerInstruction}$interviewProfile',
-        ),
-        generationConfig: GenerationConfig(
-          responseMimeType: 'application/json',
-          responseSchema: Schema.object(
-            properties: {
-              'questions': Schema.array(
-                items: Schema.string(description: '依頼人へ投げる質問文'),
-                description: '今日の日記を書くための質問リスト',
-              ),
-            },
-            requiredProperties: ['questions'],
-          ),
         ),
       ),
       // 相談室で目標を詰めるモデル。人格はインタビュアーと同じ。
@@ -165,8 +170,22 @@ class GeminiService {
                 ),
               ),
               'questions': Schema.array(
-                description: '独自質問リストへ提案する問いを3〜5件。未確定なら空配列',
-                items: Schema.string(description: '日々の記録で投げかける質問1件'),
+                description: '日々の記録に加える問いを3〜5件。未確定なら空配列',
+                items: Schema.string(description: '日々の記録で書き留める問い1件'),
+              ),
+              'steps': Schema.array(
+                description: '目標までの途中の段階（順番どおり）。区切らないなら空配列',
+                items: Schema.object(
+                  properties: {
+                    'title': Schema.string(
+                      description: '段階の一文。数字を含める。例「まず1か月で2kg減らす」',
+                    ),
+                    'deadline': Schema.string(
+                      description: '段階の期限。YYYY-MM-DD 形式。決めないなら空文字',
+                    ),
+                  },
+                  requiredProperties: ['title', 'deadline'],
+                ),
               ),
             },
             requiredProperties: [
@@ -177,13 +196,133 @@ class GeminiService {
               'deadline',
               'actions',
               'questions',
+              'steps',
             ],
           ),
         ),
       );
 
-  // 会話履歴を渡して深掘り質問をGeminiに生成させる。
-  // followUpHint を隠し指示として会話履歴に付加し、UIには表示しない。
+  // ──────────────────────────────────────────────────────────────
+  // 日々の記録
+  // ──────────────────────────────────────────────────────────────
+
+  // まとめて話した内容から、記録の表の各項目の値を取り出させる。
+  //
+  // 戻り値は extractionKey（f0, f1, …）→ 生の値。表の項目への読み替えと型の検証は
+  // 呼び出し側が proposalsFromExtraction で行う（ここは AI とのやりとりだけ）。
+  // 読み取れない応答は空の Map にする（何も提案しないだけで、表の入力は続けられる）。
+  //
+  // 人格は使わない（記録係として事実を書き写すだけなので）。
+  Future<Map<String, dynamic>> extractRecordValues({
+    required String text,
+    required List<RecordField> fields,
+  }) async {
+    if (fields.isEmpty || text.trim().isEmpty) return const {};
+    final model = GenerativeModel(
+      model: 'gemini-2.5-flash',
+      apiKey: _apiKey,
+      systemInstruction: Content.system(AiInstructions.recordExtractor()),
+      generationConfig: GenerationConfig(
+        responseMimeType: 'application/json',
+        // どの項目も必須にしない。話に出てこなかった項目は返させない
+        responseSchema: Schema.object(
+          properties: {
+            for (var i = 0; i < fields.length; i++)
+              extractionKey(i): _extractionSchema(fields[i]),
+          },
+        ),
+      ),
+    );
+    final response = await model.generateContent([
+      Content.text(
+        DiaryPrompts.buildRecordExtractionPrompt(fields: fields, text: text),
+      ),
+    ]);
+    try {
+      final decoded = jsonDecode(response.text?.trim() ?? '');
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {
+      // 読み取れない応答は「提案なし」として扱う
+    }
+    return const {};
+  }
+
+  // 項目1つぶんの、返させる値の形
+  static Schema _extractionSchema(RecordField field) {
+    final description = field.promptLabel;
+    return switch (field.kind) {
+      FieldKind.numeric => Schema.number(
+        description: field.unit.isEmpty
+            ? description
+            : '$description（${field.unit}）',
+        nullable: true,
+      ),
+      FieldKind.yesNo => Schema.boolean(description: description, nullable: true),
+      // 選択肢の無い選択肢欄（壊れたデータ）は空の enum にせず文字列で受ける。
+      // 返ってきた値は normalizeInput が選択肢に無いものとして捨てる
+      FieldKind.choice when field.choices.isNotEmpty => Schema.enumString(
+        enumValues: field.choices,
+        description: description,
+        nullable: true,
+      ),
+      FieldKind.choice || FieldKind.text => Schema.string(
+        description: description,
+        nullable: true,
+      ),
+    };
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // 聴取
+  // ──────────────────────────────────────────────────────────────
+
+  // その日の記録から、日記に書く出来事の候補を挙げさせる。
+  //
+  // 失敗・空応答のときは空リストを返す。呼び出し側は記録のテキスト項目や
+  // 定型の見出しで候補を補う（候補が出ないことで聴取を止めない）。
+  Future<List<String>> generateTopicCandidates({
+    required String recordContext,
+    List<String> recentDiaries = const [],
+    List<String> coveredTopics = const [],
+  }) async {
+    final prompt = DiaryPrompts.buildTopicPrompt(
+      recordContext: recordContext,
+      recentDiaries: recentDiaries,
+      coveredTopics: coveredTopics,
+    );
+    final response = await _topicModel.generateContent([Content.text(prompt)]);
+    final text = response.text?.trim() ?? '';
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map<String, dynamic> && decoded['topics'] is List) {
+        return [
+          for (final raw in decoded['topics'] as List)
+            if (raw is String && raw.trim().isNotEmpty) raw.trim(),
+        ];
+      }
+    } catch (_) {
+      // 読み取れない応答は候補なしとして扱う
+    }
+    return const [];
+  }
+
+  // 依頼人が選んだ出来事について、深掘りの入口になる質問を1つ返させる。
+  // 空応答のときは空文字を返す。代わりの問いはロールの文面で呼び出し側が出す
+  // （人格の台詞は lib/roles/ に置き、サービス層には持たせない）。
+  Future<String> generateTopicQuestion({
+    required String topic,
+    required String recordContext,
+  }) async {
+    final prompt =
+        '${AiInstructions.topicQuestionHint(roleFor(_role).interviewerInstruction)}\n\n'
+        '${DiaryPrompts.buildTopicQuestionPrompt(topic: topic, recordContext: recordContext)}';
+    final response = await _questionModel.generateContent([
+      Content.text(prompt),
+    ]);
+    return response.text?.trim() ?? '';
+  }
+
+  // 1つの出来事についての会話を渡して、深掘り質問を生成させる。
   // 戻り値の sufficient が true の場合、これ以上の深掘りは不要（呼び出し側で打ち切る）。
   // JSONパースに失敗した場合は安全側に倒し、sufficient:true として扱う。
   Future<({bool sufficient, String question})> generateFollowUp(
@@ -215,108 +354,33 @@ class GeminiService {
     return (sufficient: true, question: '');
   }
 
-  // 会話履歴を渡して、直前の依頼人の証言への短いリアクション（相槌）を生成させる。
-  // 自由記述の回答に対してのみ呼ぶ（ボタン選択はロール定義の固定文面を使う）。
-  // 失敗・空応答時は空文字を返し、呼び出し側でリアクション表示をスキップさせる。
-  Future<String> generateReaction(List<Map<String, String>> messages) async {
-    final history = _buildHistory(messages);
-    final prompt =
-        '${AiInstructions.reactionHint(roleFor(_role).interviewerInstruction)}\n\n以下が依頼人の証言です：\n$history';
-    final response = await _reactionModel.generateContent([
-      Content.text(prompt),
-    ]);
-    return response.text?.trim() ?? '';
-  }
-
-  Future<List<String>> generateMemoryQuestions(
-    List<MapEntry<String, Map<String, dynamic>>> entries,
-  ) async {
-    final prompt = DiaryPrompts.buildMemoryQuestionPrompt(entries);
-    final response = await _memoryQuestionModel.generateContent([
-      Content.text(prompt),
-    ]);
-    final text = response.text?.trim() ?? '';
-    final questions = <String>[];
-    try {
-      final decoded = jsonDecode(text);
-      if (decoded is Map<String, dynamic>) {
-        final rawQuestions = decoded['questions'];
-        if (rawQuestions is List) {
-          for (final q in rawQuestions) {
-            if (q is String && q.trim().isNotEmpty) {
-              questions.add(q.trim());
-            }
-          }
-        }
-      }
-    } catch (_) {
-      // パースできない場合は下のフォールバックで最低限の質問を用意する
-    }
-
-    const fallback = [
-      '今朝はどんなふうに一日が始まった？',
-      'いつもと少し違った場面はあったか？',
-      '誰かとのやりとりで覚えていることはあるか？',
-      '食事や移動、作業の中で印象に残ったものは？',
-      '今の気分に近い言葉を選ぶなら何だ？',
-      '明日の自分に残しておきたい手がかりはあるか？',
-    ];
-
-    for (final q in fallback) {
-      if (questions.length >= 5) break;
-      questions.add(q);
-    }
-    return questions.take(6).toList(growable: false);
-  }
-
-  // 会話履歴から日記テキストをGeminiに生成させる。
-  // additionalContext: カスタム質問・思い出しアシストの回答など、追加で含めるコンテキスト
+  // 聴取の会話から日記テキストを生成させる。
+  // recordContext: その日の日々の記録（日記に使う項目だけを要約したもの）
   Future<String> generateDiary(
     List<Map<String, String>> messages, {
-    String additionalContext = '',
+    String recordContext = '',
   }) async {
-    final history = _buildHistory(messages);
     final prompt = DiaryPrompts.buildDiaryPrompt(
-      history,
-      additionalContext: additionalContext,
+      _buildHistory(messages),
+      recordContext: recordContext,
     );
     final response = await _diaryModel.generateContent([Content.text(prompt)]);
     return response.text?.trim() ?? '日記を生成できませんでした。';
   }
 
-  // 既存の日記と追記インタビューの会話を統合して日記テキストをGeminiに生成させる
-  // additionalContext: カスタム質問・思い出しアシストの回答など、追加で含めるコンテキスト
+  // 既存の日記と追加の聴取を統合して日記テキストを生成させる
   Future<String> generateDiaryWithExisting(
     String existingDiary,
     List<Map<String, String>> messages, {
-    String additionalContext = '',
+    String recordContext = '',
   }) async {
-    final history = _buildHistory(messages);
     final prompt = DiaryPrompts.buildDiaryWithExistingPrompt(
       existingDiary,
-      history,
-      additionalContext: additionalContext,
+      _buildHistory(messages),
+      recordContext: recordContext,
     );
     final response = await _diaryModel.generateContent([Content.text(prompt)]);
     return response.text?.trim() ?? '日記を生成できませんでした。';
-  }
-
-  // 直近のエントリ群（日付→データ）から所見テキストをGeminiに生成させる。
-  // 呼び出し側は FirestoreService.getRecentEntries の戻り値をそのまま渡せる。
-  // answerLabels: カスタム質問・目標の行動項目のキーを質問文へ戻す対応表。
-  // エントリには参照キーしか入っていないため、渡さないとこれらは所見の材料から落ちる。
-  Future<String> generateAnalysis(
-    List<MapEntry<String, Map<String, dynamic>>> entries, {
-    Map<String, String> answerLabels = const {},
-  }) async {
-    final prompt = DiaryPrompts.buildAnalysisPrompt(
-      entries,
-      answerLabels: answerLabels,
-    );
-    final response = await _analysisModel.generateContent([
-      Content.text(prompt),
-    ]);
-    return response.text?.trim() ?? '所見を生成できませんでした。';
   }
 
   // メッセージリストを「探偵: ...」「依頼人: ...」形式の文字列に変換する
@@ -326,23 +390,44 @@ class GeminiService {
         .join('\n');
   }
 
-  // 今日のエントリと直近14日分からコメントテキストをGeminiに生成させる。
-  // answerLabels は generateAnalysis と同じ対応表。
+  // ──────────────────────────────────────────────────────────────
+  // 分析室
+  // ──────────────────────────────────────────────────────────────
+
+  // 直近の日々（mergeDays の結果）から所見テキストを生成させる。
+  // fields: 値のキー → 記録項目。記録には項目 id しか入っていないため、
+  // 渡さないとカスタム項目・目標の値は所見の材料から落ちる。
+  Future<String> generateAnalysis(
+    List<MapEntry<String, Map<String, dynamic>>> days, {
+    Map<String, RecordField> fields = const {},
+  }) async {
+    final prompt = DiaryPrompts.buildAnalysisPrompt(days, fields: fields);
+    final response = await _analysisModel.generateContent([
+      Content.text(prompt),
+    ]);
+    return response.text?.trim() ?? '所見を生成できませんでした。';
+  }
+
+  // 今日1日と直近の日々からコメントテキストを生成させる。
   Future<String> generateDailyComment(
-    Map<String, dynamic> todayEntry,
-    List<MapEntry<String, Map<String, dynamic>>> recentEntries, {
-    Map<String, String> answerLabels = const {},
+    Map<String, dynamic> today,
+    List<MapEntry<String, Map<String, dynamic>>> recentDays, {
+    Map<String, RecordField> fields = const {},
   }) async {
     final prompt = DiaryPrompts.buildDailyCommentPrompt(
-      todayEntry,
-      recentEntries,
-      answerLabels: answerLabels,
+      today,
+      recentDays,
+      fields: fields,
     );
     final response = await _analysisModel.generateContent([
       Content.text(prompt),
     ]);
     return response.text?.trim() ?? 'コメントを生成できませんでした。';
   }
+
+  // ──────────────────────────────────────────────────────────────
+  // 相談室
+  // ──────────────────────────────────────────────────────────────
 
   // 相談室の会話から、探偵の返答と（まとまっていれば）目標の見立てを生成させる。
   //
@@ -353,10 +438,6 @@ class GeminiService {
   // otherGoals は同時に追っている他の目標（同じ狙いの事件を重ねて立てさせないため）。
   // actionBudget は毎日の記録に加えられる行動項目の残り枠。
   // forcePropose は「これで目標にする」を押されたとき。材料が足りなくても案を出させる。
-  //
-  // 目標を文字列ではなく Goal のまま受けるのは、要約の作り方と件数の決め方を
-  // この層にまとめ、呼び出し側がプロンプトの形を知らずに済むようにするため
-  // （GoalPrompts を呼ぶのはもともとこの層の仕事）。
   //
   // JSONパースに失敗しても会話は止めず、聞き返しを返す
   // （generateFollowUp が sufficient:true に倒して先へ進めるのと同じ、流れを止めない方針）。

@@ -2,12 +2,7 @@ import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 
 // 選択肢をボタンで提示するウィジェット。
-//
-// DiaryPage が同じ見た目のボタンを private メソッド（_buildChoiceButtons /
-// _buildStackedChoiceButtons）で持っているが、あちらは _sendUserReply を直接呼ぶ形で
-// 状態と結びついている。1495行のステートマシンの中心部を差し替えるのは
-// 目標機能の作業としては risk が見合わないため、まずは相談室がこちらを使い、
-// DiaryPage の差し替えは別途行う（見た目の定義はここに合わせてある）。
+// 会話の画面（聴取・相談室）が同じ見た目の選択肢を出すために共有する。
 
 // 横に折り返して並べる選択肢ボタン。2択・短いラベル向け。
 class ChoiceButtons extends StatelessWidget {

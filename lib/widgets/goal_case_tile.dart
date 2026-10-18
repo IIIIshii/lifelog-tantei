@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/goal_progress.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/goal.dart';
@@ -139,8 +140,10 @@ class GoalCaseTile extends StatelessWidget {
     );
   }
 
-  // 本文。毎日追う項目があればそれを、無ければ達成の基準を副文にする。
+  // 本文。段階があれば今の段階を、毎日追う項目があればそれを、
+  // どちらも無ければ達成の基準を副文にする。
   List<Widget> _buildBody(AppColors c) {
+    final step = stepLabel(goal);
     return [
       Text(
         goal.title,
@@ -150,6 +153,31 @@ class GoalCaseTile extends StatelessWidget {
           color: c.textPrimary,
         ).copyWith(fontSize: 14),
       ),
+      if (step != null) ...[
+        const SizedBox(height: 6),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(Icons.stairs_outlined, size: 14, color: c.gold),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                step,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: c.textPrimary,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
       if (goal.actions.isNotEmpty) ...[
         const SizedBox(height: 8),
         Wrap(
@@ -159,7 +187,7 @@ class GoalCaseTile extends StatelessWidget {
             for (final action in goal.actions) _ActionChip(label: action.label),
           ],
         ),
-      ] else if (goal.metric.isNotEmpty) ...[
+      ] else if (step == null && goal.metric.isNotEmpty) ...[
         const SizedBox(height: 6),
         Text(
           goal.metric,

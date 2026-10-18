@@ -30,7 +30,7 @@ class ConsultHubPage extends StatefulWidget {
 
   /// MainShell が値を進めるたびに再読込するシグナル。
   /// タブは IndexedStack で保持され破棄されないため、他タブでの変更
-  /// （尋問で目標の項目に答えた、など）を反映するにはこの明示的な合図が要る。
+  /// （日々の記録で目標の項目を書いた、など）を反映するにはこの明示的な合図が要る。
   final ValueListenable<int> refreshSignal;
 
   const ConsultHubPage({
@@ -71,24 +71,23 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
     // 旧 goal-archive に残っているものの引き上げもこの中で済む。
     final goalsFuture = _firestore.getAllGoals(widget.uid);
     final settingsFuture = _firestore.getUserSettings(widget.uid);
+    // 「本日記録済み」は今日の日々の記録に、その目標の項目の値があるかで判定する
+    final todayFuture = _firestore.getRecord(
+      widget.uid,
+      dateKey(DateTime.now()),
+    );
 
     try {
       final divided = await goalsFuture;
       final settings = await settingsFuture;
-      // 「本日記録済み」は目標ごとのエントリで判定する
-      // （日々の記録が日記のエントリから目標の配下へ移ったため）
-      final todayEntries = await _firestore.getGoalEntriesOn(
-        widget.uid,
-        divided.active.map((goal) => goal.id),
-        dateKey(DateTime.now()),
-      );
+      final today = await todayFuture;
       if (!mounted) return;
 
       setState(() {
         _goals = divided.active;
         _closed = divided.closed;
         _role = roleFor(settings.selectedRole);
-        _recordedGoalIds = goalsRecordedIn(todayEntries, divided.active);
+        _recordedGoalIds = goalsRecordedIn(today, divided.active);
         _loading = false;
         _failed = false;
       });
@@ -124,6 +123,42 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
     );
   }
 
+  // 今の段階を達成済みにする。押し間違えても戻せるよう、スナックバーに取り消しを出す
+  // （確認ダイアログを挟まないのは、段階の達成は追跡をやめるほど重い操作ではないため）。
+  Future<void> _completeStep(Goal goal) async {
+    final step = goal.currentStep;
+    if (step == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final updated = goal.completeCurrentStep(dateKey(DateTime.now()));
+    try {
+      await _firestore.saveGoal(widget.uid, updated);
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('段階を記録できなかった: $e')));
+      return;
+    }
+    if (!mounted) return;
+    await _load();
+    final allDone = updated.currentStep == null;
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          allDone
+              ? '全ての段階を達成した。事件を閉じるなら「解決した」を押してくれ'
+              : '「${step.title}」を達成した',
+        ),
+        action: SnackBarAction(
+          label: '取り消す',
+          // 押す前の目標をそのまま書き戻す
+          onPressed: () async {
+            await _firestore.saveGoal(widget.uid, goal);
+            if (mounted) await _load();
+          },
+        ),
+      ),
+    );
+  }
+
   // 追跡を終える。閉じたものは「解決済みの事件」へ移る。
   //
   // 断念の文面を責める調子にしないのは、ホームがストリークの途切れを
@@ -137,9 +172,9 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
         content: Text(
           solved
               ? '「${goal.title}」を解決済みとして記録する。'
-                    '毎日の報告からこの事件の質問が外れる。これまでの記録は残る。'
+                    '日々の記録からこの事件の項目が外れる。これまでの記録は残る。'
               : '「${goal.title}」を解決済みの事件へ移す。'
-                    '毎日の報告から質問が外れるだけで、これまでの記録は残る。',
+                    '日々の記録から項目が外れるだけで、これまでの記録は残る。',
         ),
         actions: [
           TextButton(
@@ -241,6 +276,10 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
                 ),
                 _GoalActions(
                   onRevise: () => _openConsult(target: goal),
+                  // 段階を持たない目標・全段階を達成した目標には出さない
+                  onStepDone: goal.currentStep == null
+                      ? null
+                      : () => _completeStep(goal),
                   onSolved: () => _closeGoal(goal, GoalStatus.solved),
                   onAbandoned: () => _closeGoal(goal, GoalStatus.abandoned),
                 ),
@@ -264,7 +303,7 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
               const SectionLabel('解決済みの事件', icon: Icons.inventory_2_outlined),
               const SizedBox(height: 12),
               for (final goal in _closed) ...[
-                // 追跡を終えても記録は目標の配下に残るので、ここからも辿れる
+                // 追跡を終えても日々の記録に値が残るので、ここからも辿れる
                 _ClosedGoalTile(goal: goal, onTap: () => _openGoalLog(goal)),
                 const SizedBox(height: 10),
               ],
@@ -302,7 +341,7 @@ class _NoticeCard extends StatelessWidget {
   }
 }
 
-// 事件カードの下に並べる操作。見立てを見直す・解決した・断念した の3つ。
+// 事件カードの下に並べる操作。見立てを見直す・段階を達成した・解決した・断念した。
 //
 // bottom sheet のメニューをやめてボタンにしたのは、何ができるのかが
 // 一覧を見た時点で分かるようにするため（長押しやメニューは画面に手がかりが残らない）。
@@ -311,11 +350,15 @@ class _NoticeCard extends StatelessWidget {
 // コントラスト検証に判断が増える。色を分けなくても、解決と並べば区別は付く。
 class _GoalActions extends StatelessWidget {
   final VoidCallback onRevise;
+
+  /// 今の段階を達成済みにする。今の段階が無ければ null（ボタンを出さない）。
+  final VoidCallback? onStepDone;
   final VoidCallback onSolved;
   final VoidCallback onAbandoned;
 
   const _GoalActions({
     required this.onRevise,
+    required this.onStepDone,
     required this.onSolved,
     required this.onAbandoned,
   });
@@ -334,6 +377,13 @@ class _GoalActions extends StatelessWidget {
             color: c.gold,
             onTap: onRevise,
           ),
+          if (onStepDone != null)
+            _ActionButton(
+              icon: Icons.stairs_outlined,
+              label: '段階を達成した',
+              color: c.gold,
+              onTap: onStepDone!,
+            ),
           _ActionButton(
             icon: Icons.verified_outlined,
             label: '解決した',
@@ -444,7 +494,7 @@ class _NewCaseTile extends StatelessWidget {
 
 // 追跡を終えた事件の行。
 //
-// ここは「何を追い終えたか」の棚。記録そのものは目標の配下に残っているので、
+// ここは「何を追い終えたか」の棚。記録そのものは日々の記録に残っているので、
 // タップ先（記録一覧）は追跡を終えたあとも開ける。
 class _ClosedGoalTile extends StatelessWidget {
   final Goal goal;

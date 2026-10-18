@@ -1,46 +1,120 @@
-// 日記生成プロンプトのテンプレートを組み立てるクラス。
+// 日記まわりのプロンプトのテンプレートを組み立てるクラス。
 // 生成ルールや口調の指示は ai_instructions.dart に、
-// 会話履歴の差し込み方などテンプレート構造はここで管理する。
+// 会話履歴や記録の差し込み方などテンプレート構造はここで管理する。
+import '../core/daily_record.dart';
+import '../models/record_field.dart';
+
 class DiaryPrompts {
   DiaryPrompts._();
 
-  // 会話履歴から日記生成プロンプトを組み立てる。
-  // additionalContext: カスタム質問・思い出しアシストの回答など
+  // 聴取の会話から日記生成プロンプトを組み立てる。
+  // recordContext: その日の日々の記録（recordSummary(diaryOnly: true) の結果）
   static String buildDiaryPrompt(
     String conversationHistory, {
-    String additionalContext = '',
+    String recordContext = '',
   }) {
-    final extra = additionalContext.isNotEmpty
-        ? '\n\n【参考情報（日記に自然に織り込むこと）】\n$additionalContext'
-        : '';
-    return '以下が依頼人の証言です：\n$conversationHistory$extra';
+    return '以下が依頼人の証言です：\n$conversationHistory'
+        '${_recordBlock(recordContext)}';
   }
 
-  // 既存日記と追記インタビューを統合する日記生成プロンプトを組み立てる。
-  // additionalContext: カスタム質問・思い出しアシストの回答など
+  // 既存日記と追加の聴取を統合する日記生成プロンプトを組み立てる。
   static String buildDiaryWithExistingPrompt(
     String existingDiary,
     String conversationHistory, {
-    String additionalContext = '',
+    String recordContext = '',
   }) {
-    final extra = additionalContext.isNotEmpty
-        ? '\n\n【参考情報（日記に自然に織り込むこと）】\n$additionalContext'
-        : '';
     return '以下は今日すでに記録された捜査ログです：\n$existingDiary\n\n'
-        '以下は追加で得られた証言です：\n$conversationHistory$extra\n\n'
+        '以下は追加で得られた証言です：\n$conversationHistory'
+        '${_recordBlock(recordContext)}\n\n'
         '二つの内容を自然に統合し、捜査ログとして再記録してください。';
   }
 
-  // 直近期間の事件簿群を解析するプロンプトを組み立てる。
-  // entries は (YYYY-MM-DD, データMap) のリストで、日付昇順でも降順でも可。
-  // 内部で日付昇順に整形し直し、日記本文と主要回答だけを抜き出して渡す。
-  // answerLabels: 固定項目以外の回答キー → 人が読めるラベル（_formatAnswers 参照）。
-  static String buildAnalysisPrompt(
-    List<MapEntry<String, Map<String, dynamic>>> entries, {
-    Map<String, String> answerLabels = const {},
+  static String _recordBlock(String recordContext) => recordContext.isEmpty
+      ? ''
+      : '\n\n【日々の記録（日記に自然に織り込むこと）】\n$recordContext';
+
+  // 話題の候補出しプロンプト。
+  //
+  // recordContext: その日の記録（recordSummary の結果。空ならまだ記録が無い）
+  // recentDiaries: 直近の日記本文。記録が乏しい日に「ふだん何をしている人か」を
+  //   掴ませ、思い出すきっかけになる見出しを出させるために渡す
+  // coveredTopics: この日に既に話した出来事（同じ候補を出させないため）
+  static String buildTopicPrompt({
+    required String recordContext,
+    List<String> recentDiaries = const [],
+    List<String> coveredTopics = const [],
   }) {
-    final sorted = [...entries]..sort((a, b) => a.key.compareTo(b.key));
-    final body = _formatEntries(sorted, labels: answerLabels);
+    final buffer = StringBuffer()
+      ..writeln('【今日の記録】')
+      ..writeln(recordContext.isEmpty ? 'まだ記録は無い。' : recordContext);
+    if (recentDiaries.isNotEmpty) {
+      buffer
+        ..writeln()
+        ..writeln('【最近の日記（参考。今日の事実として扱わないこと）】');
+      for (final diary in recentDiaries) {
+        buffer.writeln('- $diary');
+      }
+    }
+    if (coveredTopics.isNotEmpty) {
+      buffer
+        ..writeln()
+        ..writeln('【既に話した出来事】');
+      for (final topic in coveredTopics) {
+        buffer.writeln('- $topic');
+      }
+    }
+    buffer
+      ..writeln()
+      ..write('今日の日記に書く出来事の候補を挙げてください。');
+    return buffer.toString();
+  }
+
+  // 出来事への最初の質問のプロンプト本文（隠し指示は呼び出し側で前に足す）。
+  static String buildTopicQuestionPrompt({
+    required String topic,
+    required String recordContext,
+  }) {
+    final record = recordContext.isEmpty ? '' : '\n\n【今日の記録】\n$recordContext';
+    return '依頼人が話したい出来事：$topic$record';
+  }
+
+  // 話した内容を記録の表へ振り分けるプロンプト。
+  //
+  // 項目は extractionKey（f0, f1, …）で示し、返答も同じキーで受ける。
+  // 型ごとに何を入れればよいかを添えるのは、返させる形（responseSchema）だけでは
+  // 「単位」「選択肢の意味」が伝わらないため。
+  static String buildRecordExtractionPrompt({
+    required List<RecordField> fields,
+    required String text,
+  }) {
+    final buffer = StringBuffer()..writeln('【記録の項目】');
+    for (var i = 0; i < fields.length; i++) {
+      final field = fields[i];
+      final how = switch (field.kind) {
+        FieldKind.numeric =>
+          field.unit.isEmpty ? '数値' : '数値・単位は${field.unit}',
+        FieldKind.yesNo => field.isGoal ? 'はい／いいえ（やったかどうか）' : 'はい／いいえ',
+        FieldKind.choice => '選択肢: ${field.choices.join(' / ')}',
+        FieldKind.text => '短い文章',
+      };
+      buffer.writeln('- ${extractionKey(i)}: ${field.promptLabel}（$how）');
+    }
+    buffer
+      ..writeln()
+      ..writeln('【依頼人の話】')
+      ..write(text.trim());
+    return buffer.toString();
+  }
+
+  // 直近期間の事件簿群を解析するプロンプトを組み立てる。
+  // days は mergeDays の結果（(YYYY-MM-DD, {values, diary})）。日付順は問わない。
+  // fields: 値のキー → 記録項目（fieldIndex の結果）。ここに無いキーの値は渡さない。
+  static String buildAnalysisPrompt(
+    List<MapEntry<String, Map<String, dynamic>>> days, {
+    Map<String, RecordField> fields = const {},
+  }) {
+    final sorted = [...days]..sort((a, b) => a.key.compareTo(b.key));
+    final body = _formatDays(sorted, fields);
 
     return '以下は依頼人の直近${sorted.length}日分の事件簿である。\n\n'
         '$body\n\n'
@@ -52,104 +126,15 @@ class DiaryPrompts {
         '■励まし（光っている取り組みへの一言）';
   }
 
-  static String buildMemoryQuestionPrompt(
-    List<MapEntry<String, Map<String, dynamic>>> entries,
-  ) {
-    final sorted = [...entries]..sort((a, b) => a.key.compareTo(b.key));
-    final body = sorted.isEmpty ? 'まだ参照できる過去ログはありません。' : _formatEntries(sorted);
-
-    return '以下は依頼人の直近${sorted.length}日分の事件簿である。\n\n'
-        '$body\n\n'
-        '【依頼内容】\n'
-        '依頼人は今日、「何もなかった」と感じている。'
-        'しかし日記を書くための手がかりを一緒に探したい。\n'
-        '過去2週間の記録に出てくる生活リズム、場所、人、作業、感情の傾向を参考にして、'
-        '今日を思い出すための質問を5〜6問作ってください。\n\n'
-        '【質問のルール】\n'
-        '- 質問は短く、1問につき1つのことだけ聞く\n'
-        '- 過去ログの事実を断定しすぎず、「今日はどうだったか」を聞く\n'
-        '- 日記本文を生成せず、質問だけを返す\n'
-        '- ネガティブな決めつけや評価をしない\n\n'
-        '出力は次のJSON形式だけにしてください：\n'
-        '{"questions":["質問1","質問2","質問3","質問4","質問5"]}';
-  }
-
-  // 複数エントリを「【日付】日記: ... / 回答: ...」形式の文字列に整形する
-  static String _formatEntries(
-    List<MapEntry<String, Map<String, dynamic>>> entries, {
-    Map<String, String> labels = const {},
-  }) {
-    return entries
-        .map((e) {
-          final data = e.value;
-          final diary = (data['diary'] as String?)?.trim();
-          final answers = data['answers'] as Map<String, dynamic>?;
-          final numeric = data['numericAnswers'] as Map<String, dynamic>?;
-
-          final parts = <String>['【${e.key}】'];
-          if (diary != null && diary.isNotEmpty) parts.add('日記: $diary');
-          final answerLine = _formatAnswers(answers, numeric, labels: labels);
-          if (answerLine.isNotEmpty) parts.add('回答: $answerLine');
-          return parts.join('\n');
-        })
-        .join('\n\n');
-  }
-
-  // labels: 固定項目以外の回答キー → 人が読めるラベル。
-  // カスタム質問なら質問文、目標の行動項目なら目標名付きの項目名が入る。
-  //
-  // エントリ側に保存されているのは custom_<uuid> / goal_<uuid> という
-  // 参照キーだけで、それが何を尋ねた答えなのかはユーザー設定・目標の側にしかない。
-  // 対応表を呼び出し側から渡させるのはこのため。
-  //
-  // 逆に、ここに載っていないキーは渡さない。設定から消された質問の回答や
-  // 安定ID導入前のキー（custom_0 等）が該当し、何への答えか分からない値を
-  // 所見の材料にすると、AI が文脈を勝手に補う方向に働くため。
-  static String _formatAnswers(
-    Map<String, dynamic>? answers,
-    Map<String, dynamic>? numeric, {
-    Map<String, String> labels = const {},
-  }) {
-    if (answers == null && numeric == null) return '';
-    final pairs = <String>[];
-    final sleep = numeric?['sleep'];
-    if (sleep is num) pairs.add('睡眠${sleep}h');
-    void add(String key, String label) {
-      final v = answers?[key];
-      if (v is String && v.isNotEmpty) pairs.add('$label:$v');
-    }
-
-    add('food', '食事');
-    add('exercise', '運動');
-    add('study', '勉強');
-    add('event_what', '出来事');
-    add('event_how', '感情');
-    add('event_where', '場所');
-    labels.forEach(add);
-    return pairs.join(' / ');
-  }
-
-  // 今日1日のエントリと直近14日分を渡して、今日へのコメントプロンプトを組み立てる。
-  // answerLabels: 固定項目以外の回答キー → 人が読めるラベル（_formatAnswers 参照）。
+  // 今日1日と直近の日々を渡して、今日へのコメントプロンプトを組み立てる。
   static String buildDailyCommentPrompt(
-    Map<String, dynamic> todayEntry,
-    List<MapEntry<String, Map<String, dynamic>>> recentEntries, {
-    Map<String, String> answerLabels = const {},
+    Map<String, dynamic> today,
+    List<MapEntry<String, Map<String, dynamic>>> recentDays, {
+    Map<String, RecordField> fields = const {},
   }) {
-    // 今日のデータを整形
-    final diary = (todayEntry['diary'] as String?)?.trim();
-    final answers = todayEntry['answers'] as Map<String, dynamic>?;
-    final numeric = todayEntry['numericAnswers'] as Map<String, dynamic>?;
-
-    final todayParts = <String>[];
-    if (diary != null && diary.isNotEmpty) todayParts.add('日記: $diary');
-    final answerLine = _formatAnswers(answers, numeric, labels: answerLabels);
-    if (answerLine.isNotEmpty) todayParts.add('回答: $answerLine');
-    final todayBody = todayParts.join('\n');
-
-    // 直近14日分を整形
-    final sorted = [...recentEntries]..sort((a, b) => a.key.compareTo(b.key));
-    final recentBody = _formatEntries(sorted, labels: answerLabels);
+    final todayBody = _formatDay(today, fields);
+    final sorted = [...recentDays]..sort((a, b) => a.key.compareTo(b.key));
+    final recentBody = _formatDays(sorted, fields);
 
     return '以下は依頼人の今日の記録である。\n\n'
         '$todayBody\n\n'
@@ -161,5 +146,49 @@ class DiaryPrompts {
         '■今日の要約\n'
         '■気になった点（直近の傾向との違い・変化）\n'
         '■探偵からの一言';
+  }
+
+  // 複数日を「【日付】\n日記: ... / 記録: ...」の形に整形する
+  static String _formatDays(
+    List<MapEntry<String, Map<String, dynamic>>> days,
+    Map<String, RecordField> fields,
+  ) {
+    return days
+        .map((e) => '【${e.key}】\n${_formatDay(e.value, fields)}')
+        .join('\n\n');
+  }
+
+  // 1日分（mergeDays の1要素の値）を「日記: ... / 記録: ...」の行にする。
+  static String _formatDay(
+    Map<String, dynamic> day,
+    Map<String, RecordField> fields,
+  ) {
+    final parts = <String>[];
+    final diary = (day['diary'] as String?)?.trim();
+    if (diary != null && diary.isNotEmpty) parts.add('日記: $diary');
+    final values = _formatValues(day, fields);
+    if (values.isNotEmpty) parts.add('記録: $values');
+    return parts.join('\n');
+  }
+
+  // 記録の値を「ラベル:値」で並べる。
+  //
+  // 記録ドキュメントに入っているのは項目 id（custom_<uuid> / goal_<uuid> など）だけで、
+  // それが何を記録したものかは記録の型・目標の側にしかない。対応表を呼び出し側から
+  // 渡させるのはこのため。
+  //
+  // 逆に、対応表に無いキーは渡さない。定義ごと消された項目の値が該当し、
+  // 何の記録か分からない値を所見の材料にすると、AI が文脈を勝手に補う方向に働くため。
+  static String _formatValues(
+    Map<String, dynamic> day,
+    Map<String, RecordField> fields,
+  ) {
+    final pairs = <String>[];
+    for (final field in fields.values) {
+      final text = formatValue(field, valueOf(day, field.id));
+      if (text == null) continue;
+      pairs.add('${field.promptLabel}:$text');
+    }
+    return pairs.join(' / ');
   }
 }

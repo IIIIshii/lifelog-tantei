@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
 
+import '../core/daily_record.dart';
 import '../core/goal_progress.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/goal.dart';
+import '../models/record_field.dart';
 import '../services/firestore_service.dart';
+import '../widgets/goal_step_list.dart';
 import '../widgets/section_label.dart';
-import 'goal_log_detail_page.dart';
+import 'record_sheet_page.dart';
 
 // 目標1件の追跡記録の一覧。相談室で事件をタップして開く。
+//
+// 目標の項目の値は日々の記録（records/{date}）に入っているので、着手日以降の
+// 記録を読み、この目標の項目に値がある日だけを並べる。行をタップすると
+// その日の記録の表を開き、値を直せる。
 //
 // 期間は着手日（createdAt）から今日まで。直近N日に切らないのは、目標が
 // アプリ全体で「着手から n 日」で語られているため ―― 直近N日だと着手直後は
@@ -18,9 +25,6 @@ import 'goal_log_detail_page.dart';
 // その中に埋もれる。欠けは見出しの「記録 12 / 45日」で数として伝える
 // （達成率が「答えた日だけを母数にする」のと同じ考え方で、記録が無い日と
 // 未達の日を混ぜない）。
-//
-// 一覧を snapshots() で購読しないのは、この画面が開いている間に他タブから
-// 書き換わらないため。常時開いている事件簿タブ（DiaryListPage）とは事情が違う。
 class GoalLogPage extends StatefulWidget {
   final String uid;
   final Goal goal;
@@ -47,14 +51,16 @@ class _GoalLogPageState extends State<GoalLogPage> {
 
   Future<void> _load() async {
     try {
-      final entries = await _firestore.getGoalEntriesSince(
+      final records = await _firestore.getRecordsSince(
         widget.uid,
-        widget.goal.id,
         // 着手日を持たない古い目標は全期間を見る（起点が分からないため）
         widget.goal.createdAt.isEmpty ? '' : widget.goal.createdAt,
       );
       if (!mounted) return;
-      entries.sort((a, b) => b.key.compareTo(a.key));
+      // この目標の項目に値がある日だけ、新しい日が上
+      final entries =
+          records.where((e) => hasAnswerForGoal(e.value, widget.goal)).toList()
+            ..sort((a, b) => b.key.compareTo(a.key));
       setState(() {
         _entries = entries;
         _loading = false;
@@ -76,18 +82,14 @@ class _GoalLogPageState extends State<GoalLogPage> {
     return daysSince(widget.goal.createdAt, DateTime.now()) + 1;
   }
 
-  void _openDetail(String date, Map<String, dynamic> entry) {
+  // その日の記録の表を開く（値を直したら一覧も読み直す）
+  void _openDay(String date) {
     Navigator.push(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => GoalLogDetailPage(
-          uid: widget.uid,
-          goal: widget.goal,
-          date: date,
-          entry: entry,
-        ),
+        builder: (_) => RecordSheetPage(uid: widget.uid, date: date),
       ),
-    );
+    ).then((_) => _load());
   }
 
   @override
@@ -127,7 +129,7 @@ class _GoalLogPageState extends State<GoalLogPage> {
             _buildHeader(c),
             const SizedBox(height: 28),
             SectionLabel(
-              '報告の記録',
+              '日々の記録',
               icon: Icons.fact_check_outlined,
               // 記録が無い日を行にしない代わりに、欠けを数で見せる
               trailing: _loading
@@ -147,14 +149,14 @@ class _GoalLogPageState extends State<GoalLogPage> {
             if (_loading)
               _NoticeCard(message: '照会中…')
             else if (_entries.isEmpty)
-              _NoticeCard(message: 'まだ報告は上がっていない。')
+              _NoticeCard(message: 'まだこの事件の記録は無い。')
             else
               for (final entry in _entries) ...[
                 _GoalLogTile(
                   goal: widget.goal,
                   date: entry.key,
-                  entry: entry.value,
-                  onTap: () => _openDetail(entry.key, entry.value),
+                  record: entry.value,
+                  onTap: () => _openDay(entry.key),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -211,23 +213,30 @@ class _GoalLogPageState extends State<GoalLogPage> {
               ),
             ),
           ],
+          // 段階の全体。どこまで来て、次に何があるかをここで見渡す
+          if (goal.steps.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: c.cardBorder),
+            const SizedBox(height: 8),
+            GoalStepList(steps: goal.steps),
+          ],
         ],
       ),
     );
   }
 }
 
-// 1日分の報告の行。日付と、質問ごとの答えをチップで並べる。
+// 1日分の記録の行。日付と、項目ごとの値をチップで並べる。
 class _GoalLogTile extends StatelessWidget {
   final Goal goal;
   final String date;
-  final Map<String, dynamic> entry;
+  final Map<String, dynamic> record;
   final VoidCallback onTap;
 
   const _GoalLogTile({
     required this.goal,
     required this.date,
-    required this.entry,
+    required this.record,
     required this.onTap,
   });
 
@@ -318,21 +327,11 @@ class _GoalLogTile extends StatelessWidget {
     );
   }
 
-  // その日の答え。数値項目は控えた数値（単位つき）、チェック項目は達成／未達。
-  // 答えていない・スキップした項目は「—」（記録して0だったことと区別する）。
+  // その日の値。数値項目は単位つき、チェック項目は達成／未達。
+  // 記録していない項目は「—」（記録して0だったことと区別する）。
   String _valueFor(GoalAction action) {
-    if (action.isNumeric) {
-      final value = numericFor(entry, action.answerKey);
-      if (value != null) {
-        final text = value == value.roundToDouble()
-            ? value.toStringAsFixed(0)
-            : value.toStringAsFixed(1);
-        return action.unit.isEmpty ? text : '$text${action.unit}';
-      }
-      // 数字として控えられなかった自由記述は、書かれたままを出す
-      return answerFor(entry, action.answerKey) ?? '—';
-    }
-    return answerFor(entry, action.answerKey) ?? '—';
+    final field = RecordField.fromGoalAction(goal, action);
+    return formatValue(field, valueOf(record, field.id)) ?? '—';
   }
 }
 

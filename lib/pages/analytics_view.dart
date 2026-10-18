@@ -1,109 +1,111 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import '../core/chart_scale.dart';
+import '../core/daily_record.dart';
+import '../core/goal_progress.dart';
+import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
-import '../core/chart_scale.dart';
-import '../core/goal_progress.dart';
+import '../models/analysis_entry.dart';
 import '../models/goal.dart';
-import '../models/user_settings.dart';
+import '../models/record_field.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
+import 'analysis_history_page.dart';
 
-// 証拠分析室：活動記録をグラフ・表で表示するページ
-class AnalyticsPage extends StatefulWidget {
-  const AnalyticsPage({super.key});
+// 証拠分析室：日々の記録と日記をグラフ・表・AIの所見で読み返す。
+//
+// 事件簿タブ（CaseFilesPage）の「分析」側の中身。AppBar はタブ側が持つので、
+// ここは本文だけを返す。この画面が自分で持つデータは AI の所見（analyses）だけで、
+// 他は records / diaries / 記録の型 / 目標を読むだけ。
+// 所見は上書きせずに積み、過去のものは AnalysisHistoryPage で読み返す。
+class AnalyticsView extends StatefulWidget {
+  final String uid;
+
+  /// MainShell が値を進めるたびに読み直すシグナル。
+  /// タブは IndexedStack で保持され破棄されないため、記録を書き足しても
+  /// この合図が無いとグラフが古いまま残る。
+  final ValueListenable<int> refreshSignal;
+
+  const AnalyticsView({
+    super.key,
+    required this.uid,
+    required this.refreshSignal,
+  });
 
   @override
-  State<AnalyticsPage> createState() => _AnalyticsPageState();
+  State<AnalyticsView> createState() => _AnalyticsViewState();
 }
 
-class _AnalyticsPageState extends State<AnalyticsPage> {
+class _AnalyticsViewState extends State<AnalyticsView>
+    with AutomaticKeepAliveClientMixin {
   final FirestoreService _firestore = FirestoreService();
   GeminiService? _gemini;
+
+  static const int _days = 14;
 
   bool _isLoading = true;
   bool _isGeneratingAnalysis = false;
   bool _isGeneratingDailyAnalysis = false;
-  // YYYY-MM-DD → 睡眠時間（記録なし日はnull）
-  final Map<String, double?> _sleepData = {};
-  // YYYY-MM-DD → エントリ全データ
-  final Map<String, Map<String, dynamic>> _entriesData = {};
-  UserSettings? _settings;
+
+  List<MapEntry<String, Map<String, dynamic>>> _records = const [];
+  List<MapEntry<String, Map<String, dynamic>>> _diaries = const [];
+  List<RecordField> _fields = const [];
   List<Goal> _goals = const [];
-  // 目標 id → その目標の日々の記録（直近 _days 日）。
-  // 日記のエントリとは別のコレクションに入っているので、目標ごとに分けて持つ。
-  Map<String, List<MapEntry<String, Map<String, dynamic>>>> _goalEntries =
-      const {};
-  // 回答キー → 何を尋ねた答えかを示すラベル。
-  // エントリに入っているのは custom_<uuid> / goal_<uuid> という参照キーだけなので、
-  // これを添えないとカスタム質問・目標の回答は所見の材料から落ちる。
-  Map<String, String> _answerLabels = const {};
+  // 値のキー → 記録項目。記録には項目 id しか入っていないので、
+  // これを添えないとカスタム項目・目標の値は所見の材料から落ちる。
+  Map<String, RecordField> _fieldIndex = const {};
   _AnalyticsSummary? _summary;
   String? _analysisText;
   String? _dailyAnalysisText;
   DateTime? _analysisGeneratedAt;
   DateTime? _dailyAnalysisGeneratedAt;
 
-  static const int _days = 14;
+  // タブを横に切り替えても読み直さない（読み直しは refreshSignal と引き下げで行う）
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
+    widget.refreshSignal.addListener(_loadData);
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    widget.refreshSignal.removeListener(_loadData);
+    super.dispose();
   }
 
   Future<void> _loadData() async {
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-
-      // 並行フェッチ
-      final entriesFuture = _firestore.getRecentEntries(uid, _days);
-      final settingsFuture = _firestore.getUserSettings(uid);
-      final analysisFuture = _firestore.getLatestAnalysis(uid);
-      final dailyCommentFuture = _firestore.getTodayComment(uid);
-      final selfAnalysisFuture = _firestore.getSelfAnalysis(uid);
+      final uid = widget.uid;
+      final recordsFuture = _firestore.getRecentRecords(uid, _days);
+      final diariesFuture = _firestore.getRecentDiaries(uid, _days);
+      final fieldsFuture = _firestore.getFields(uid);
       final goalsFuture = _firestore.getGoals(uid);
-      final entries = await entriesFuture;
-      final settings = await settingsFuture;
-      final analysis = await analysisFuture;
-      final dailyComment = await dailyCommentFuture;
-      final selfAnalysis = await selfAnalysisFuture;
+      final settingsFuture = _firestore.getUserSettings(uid);
+      // 最新の所見と今日のコメントを出すのに、新しいものから少しだけ読めば足りる
+      final analysesFuture = _firestore.getAnalyses(uid, limit: 20);
+      final selfAnalysisFuture = _firestore.getSelfAnalysis(uid);
+      final records = await recordsFuture;
+      final diaries = await diariesFuture;
+      final fields = await fieldsFuture;
       final goals = await goalsFuture;
-
-      // 目標の進捗は目標ごとの記録（goals/{goalId}/entries）から出す。
-      // 日記のエントリには入らなくなったため、目標の件数ぶん並行に読む
-      // （追跡中は kMaxTrackedGoals 件までなので、これで足りる）。
-      final goalEntries =
-          <String, List<MapEntry<String, Map<String, dynamic>>>>{};
-      await Future.wait(
-        goals.map(
-          (goal) async => goalEntries[goal.id] = await _firestore
-              .getRecentGoalEntries(uid, goal.id, _days),
-        ),
+      final settings = await settingsFuture;
+      final analyses = await analysesFuture;
+      final selfAnalysis = await selfAnalysisFuture;
+      final latest = latestAnalysis(analyses, AnalysisKind.period);
+      // 今日のコメントは今日書いたものだけ（日が変わったら古いので出さない）
+      final today = latestAnalysis(
+        analyses,
+        AnalysisKind.daily,
+        onDate: dateKey(DateTime.now()),
       );
-
-      final sleepData = <String, double?>{};
-      final entriesData = <String, Map<String, dynamic>>{};
-      for (final entry in entries) {
-        entriesData[entry.key] = entry.value;
-        final numeric = entry.value['numericAnswers'] as Map<String, dynamic>?;
-        final sleep = numeric?['sleep'];
-        sleepData[entry.key] = sleep != null ? (sleep as num).toDouble() : null;
-      }
-
-      final summary = _AnalyticsSummary.from(entries, _dateRange);
-
-      // 設定と目標は今ここにしかないので、この場で回答キーの対応表に畳んでおく。
-      // 今も追っている質問・項目だけが載る（消された質問や安定ID導入前のキーは
-      // 何への答えか分からないため、意図的に載せない）。
-      final answerLabels = <String, String>{
-        for (final question in settings.customQuestions)
-          question.answerKey: question.text,
-        for (final goal in goals) ...goal.qualifiedAnswerLabels(),
-      };
 
       // 自己分析は共有トグルの判定ごと GeminiService に委ねる。
       // OFF なら所見・今日のコメントのどちらにも差し込まれない。
@@ -115,44 +117,16 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
       if (!mounted) return;
       setState(() {
-        // 引き直したときに期間から外れた古い日付が残らないよう、毎回入れ替える。
-        // 初回1回きりだった頃は addAll で足りていたが、再読込できるようにした以上
-        // 蓄積させると所見へ14日より前のエントリが混ざる。
-        _sleepData
-          ..clear()
-          ..addAll(sleepData);
-        _entriesData
-          ..clear()
-          ..addAll(entriesData);
-        _settings = settings;
+        _records = records;
+        _diaries = diaries;
+        _fields = fields;
         _goals = goals;
-        _goalEntries = goalEntries;
-        _answerLabels = answerLabels;
-        _summary = summary;
-        if (analysis != null) {
-          _analysisText = analysis['text'] as String?;
-          final ts = analysis['generatedAt'];
-          if (ts is Timestamp) _analysisGeneratedAt = ts.toDate();
-        }
-        if (dailyComment != null) {
-          _dailyAnalysisText = dailyComment['text'] as String?;
-          final ts = dailyComment['generatedAt'];
-          if (ts is Timestamp) {
-            final generated = ts.toDate();
-            final now = DateTime.now();
-            final isToday =
-                generated.year == now.year &&
-                generated.month == now.month &&
-                generated.day == now.day;
-            if (isToday) {
-              _dailyAnalysisGeneratedAt = generated;
-            } else {
-              // 日付が変わっている場合は古いキャッシュなので表示しない
-              _dailyAnalysisText = null;
-              _dailyAnalysisGeneratedAt = null;
-            }
-          }
-        }
+        _fieldIndex = fieldIndex(fields, goals);
+        _summary = _AnalyticsSummary.from(records, diaries, _dateRange);
+        _analysisText = latest?.text;
+        _analysisGeneratedAt = latest?.generatedAt;
+        _dailyAnalysisText = today?.text;
+        _dailyAnalysisGeneratedAt = today?.generatedAt;
         _isLoading = false;
       });
     } catch (_) {
@@ -161,46 +135,41 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     }
   }
 
-  // 日記も目標の報告も1件も無い状態か。所見を出せるかの判定に使う。
-  bool _hasNoRecords() =>
-      _entriesData.isEmpty &&
-      _goalEntries.values.every((entries) => entries.isEmpty);
+  // AI へ渡す日々。記録と日記を日付で重ねたもの（保存はしない）。
+  List<MapEntry<String, Map<String, dynamic>>> get _mergedDays =>
+      mergeDays(_records, _diaries);
 
-  // AI へ渡すエントリ。日記と目標の記録を日付で重ねたもの（保存はしない）。
-  //
-  // 分離したことで目標の回答は日記のエントリに入らなくなった。そのまま渡すと
-  // 「何を追っていて、どう進んだか」が所見の材料から静かに落ちる
-  // ―― 出力を読んでも欠けたことに気づけないので、渡す直前に合わせる。
-  List<MapEntry<String, Map<String, dynamic>>> _mergedEntries() =>
-      mergeGoalAnswers([
-        for (final entry in _entriesData.entries)
-          MapEntry(entry.key, entry.value),
-      ], _goalEntries);
+  void _snack(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
 
   Future<void> _generateAnalysis() async {
     if (_isGeneratingAnalysis) return;
-    // 日記が無くても目標の報告があれば所見は出せる（材料はマージして渡す）
-    if (_hasNoRecords()) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('まだ記録が残されていない')));
+    final days = _mergedDays;
+    if (days.isEmpty) {
+      _snack('まだ記録が残されていない');
       return;
     }
     final gemini = _gemini;
     if (gemini == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('初期化が完了していない')));
+      _snack('初期化が完了していない');
       return;
     }
     setState(() => _isGeneratingAnalysis = true);
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final text = await gemini.generateAnalysis(
-        _mergedEntries(),
-        answerLabels: _answerLabels,
+      final text = await gemini.generateAnalysis(days, fields: _fieldIndex);
+      await _firestore.addAnalysis(
+        widget.uid,
+        AnalysisEntry(
+          id: '',
+          kind: AnalysisKind.period,
+          text: text,
+          date: dateKey(DateTime.now()),
+          periodDays: _days,
+        ),
       );
-      await _firestore.saveAnalysis(uid, text);
       if (!mounted) return;
       setState(() {
         _analysisText = text;
@@ -210,56 +179,45 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isGeneratingAnalysis = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('所見の生成に失敗した: $e')));
+      _snack('所見の生成に失敗した: $e');
     }
   }
 
   Future<void> _generateDailyAnalysis() async {
     if (_isGeneratingDailyAnalysis) return;
-    // 日記が無くても目標の報告があれば所見は出せる（材料はマージして渡す）
-    if (_hasNoRecords()) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('まだ記録が残されていない')));
+    final days = _mergedDays;
+    final todayKey = dateKey(DateTime.now());
+    final today = days
+        .firstWhere(
+          (entry) => entry.key == todayKey,
+          orElse: () => MapEntry(todayKey, const <String, dynamic>{}),
+        )
+        .value;
+    if (today.isEmpty) {
+      _snack('今日の記録がまだない');
       return;
     }
     final gemini = _gemini;
     if (gemini == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('初期化が完了していない')));
+      _snack('初期化が完了していない');
       return;
     }
     setState(() => _isGeneratingDailyAnalysis = true);
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final today = DateTime.now().toIso8601String().split('T')[0];
-      // 日記と目標を重ねたうえで今日の分を取り出す。
-      // 目標の報告だけ済んでいて日記を書いていない日も材料にできる。
-      final merged = _mergedEntries();
-      final todayEntry = merged
-          .firstWhere(
-            (entry) => entry.key == today,
-            orElse: () => MapEntry(today, const <String, dynamic>{}),
-          )
-          .value;
-
-      if (todayEntry.isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('今日の記録がまだない')));
-        setState(() => _isGeneratingDailyAnalysis = false);
-        return;
-      }
-
       final text = await gemini.generateDailyComment(
-        todayEntry,
-        merged,
-        answerLabels: _answerLabels,
+        today,
+        days,
+        fields: _fieldIndex,
       );
-      await _firestore.saveTodayComment(uid, text);
+      await _firestore.addAnalysis(
+        widget.uid,
+        AnalysisEntry(
+          id: '',
+          kind: AnalysisKind.daily,
+          text: text,
+          date: todayKey,
+        ),
+      );
       if (!mounted) return;
       setState(() {
         _dailyAnalysisText = text;
@@ -269,131 +227,152 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isGeneratingDailyAnalysis = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('コメントの生成に失敗した: $e')));
+      _snack('コメントの生成に失敗した: $e');
     }
   }
 
-  // 直近 _days 日分の YYYY-MM-DD リスト（古い順）
+  // 直近 _days 日分の YYYY-MM-DD リスト（古い順）。
+  // Duration で引かずに日フィールドで遡るのは夏時間対策（streak.dart と同じ）。
   List<String> get _dateRange {
     final now = DateTime.now();
-    return List.generate(_days, (i) {
-      final d = now.subtract(Duration(days: _days - 1 - i));
-      return d.toIso8601String().split('T')[0];
-    });
+    return List.generate(
+      _days,
+      (i) => dateKey(DateTime(now.year, now.month, now.day - (_days - 1 - i))),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final dates = _dateRange;
+    super.build(context);
     final c = context.colors;
-    return Scaffold(
-      backgroundColor: c.background,
-      appBar: AppBar(
-        backgroundColor: c.appBarBg,
-        foregroundColor: c.appBarFg,
-        elevation: 0,
-        toolbarHeight: 64,
-        title: Column(
+    if (_isLoading) {
+      return Center(child: CircularProgressIndicator(color: c.gold));
+    }
+
+    final dates = _dateRange;
+    final recordByDate = {for (final e in _records) e.key: e.value};
+    final sleepActive = _fields.any((f) => f.id == kSleepFieldId && f.active);
+    // 睡眠以外の数値項目は、点が2つ以上あるものだけ推移を出す
+    final numericFields = [
+      for (final field in _fields)
+        if (field.active &&
+            field.kind == FieldKind.numeric &&
+            field.id != kSleepFieldId &&
+            numericSeries(_records, field.id).length >= 2)
+          field,
+    ];
+    final tableFields = _fields.where((f) => f.active).toList();
+
+    return RefreshIndicator(
+      color: c.gold,
+      backgroundColor: c.cardBg,
+      onRefresh: _loadData,
+      child: SingleChildScrollView(
+        // 中身が画面に収まっているときも引っ張って更新できるようにする
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '証拠分析室',
-              style: DetectiveTextStyles.appBarTitle(color: c.appBarFg),
+            _SectionHeader(title: '探偵の所見', subtitle: '直近$_days日間'),
+            const SizedBox(height: 16),
+            _AiInsightSection(
+              text: _analysisText,
+              generatedAt: _analysisGeneratedAt,
+              isLoading: _isGeneratingAnalysis,
+              onGenerate: _generateAnalysis,
             ),
-            const SizedBox(height: 2),
-            Text(
-              '― データを読む ―',
-              style: DetectiveTextStyles.appBarSubtitle(
-                color: c.appBarSubtitle,
+            const SizedBox(height: 32),
+            _SectionHeader(title: '今日の行動', subtitle: '本日分'),
+            const SizedBox(height: 16),
+            _AiInsightSection(
+              text: _dailyAnalysisText,
+              generatedAt: _dailyAnalysisGeneratedAt,
+              isLoading: _isGeneratingDailyAnalysis,
+              onGenerate: _generateDailyAnalysis,
+            ),
+            // 所見は上書きせず積んでいるので、過去のものを読み返せる
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => AnalysisHistoryPage(uid: widget.uid),
+                  ),
+                ),
+                icon: Icon(Icons.history, size: 16, color: c.gold),
+                label: Text(
+                  '過去の所見を読む',
+                  style: TextStyle(fontSize: 12, color: c.gold),
+                ),
               ),
+            ),
+            const SizedBox(height: 20),
+            _SectionHeader(title: 'サマリー', subtitle: '直近$_days日間'),
+            const SizedBox(height: 16),
+            _SummaryCards(summary: _summary),
+            const SizedBox(height: 32),
+            // 目標を追っていないときはセクションごと消える
+            if (_goals.isNotEmpty) ...[
+              _SectionHeader(
+                title: '追跡中の目標',
+                subtitle: '${_goals.length}件 / 直近$_days日間',
+              ),
+              const SizedBox(height: 16),
+              // 見出しは1つに留め、目標ごとの区切りは罫線で表す。
+              for (var i = 0; i < _goals.length; i++) ...[
+                if (i > 0) ...[
+                  const SizedBox(height: 24),
+                  Divider(height: 1, color: c.cardBorder),
+                  const SizedBox(height: 24),
+                ],
+                _GoalProgressSection(goal: _goals[i], records: _records),
+              ],
+              const SizedBox(height: 32),
+            ],
+            if (_summary != null && _summary!.moodDistribution.isNotEmpty) ...[
+              _SectionHeader(title: '気分の傾向', subtitle: '今日の気分の分布'),
+              const SizedBox(height: 16),
+              _PieCard(title: '今日の気分', distribution: _summary!.moodDistribution),
+              const SizedBox(height: 32),
+            ],
+            if (sleepActive) ...[
+              _SectionHeader(title: '睡眠時間', subtitle: '直近$_days日間'),
+              const SizedBox(height: 16),
+              _SleepChart(
+                dates: dates,
+                sleepData: {
+                  for (final date in dates)
+                    date: numberOf(recordByDate[date], kSleepFieldId),
+                },
+              ),
+              const SizedBox(height: 32),
+            ],
+            if (numericFields.isNotEmpty) ...[
+              _SectionHeader(title: '数値の推移', subtitle: '直近$_days日間'),
+              const SizedBox(height: 16),
+              for (final field in numericFields) ...[
+                _NumericChart(
+                  label: field.label,
+                  unit: field.unit,
+                  target: field.target,
+                  series: numericSeries(_records, field.id),
+                ),
+                const SizedBox(height: 16),
+              ],
+              const SizedBox(height: 16),
+            ],
+            _SectionHeader(title: '記録の一覧', subtitle: '直近$_days日間'),
+            const SizedBox(height: 16),
+            _RecordsTable(
+              dates: dates.reversed.toList(), // 新しい順
+              recordByDate: recordByDate,
+              fields: tableFields,
             ),
           ],
         ),
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator(color: c.gold))
-          : RefreshIndicator(
-              color: c.gold,
-              backgroundColor: c.cardBg,
-              onRefresh: _loadData,
-              child: SingleChildScrollView(
-                // 中身が画面に収まっているときも引っ張って更新できるようにする
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _SectionHeader(title: '探偵の所見', subtitle: '直近$_days日間'),
-                    const SizedBox(height: 16),
-                    _AiInsightSection(
-                      text: _analysisText,
-                      generatedAt: _analysisGeneratedAt,
-                      isLoading: _isGeneratingAnalysis,
-                      onGenerate: _generateAnalysis,
-                    ),
-                    const SizedBox(height: 32),
-                    _SectionHeader(title: '今日の行動', subtitle: '本日分'),
-                    const SizedBox(height: 16),
-                    _AiInsightSection(
-                      text: _dailyAnalysisText,
-                      generatedAt: _dailyAnalysisGeneratedAt,
-                      isLoading: _isGeneratingDailyAnalysis,
-                      onGenerate: _generateDailyAnalysis,
-                    ),
-                    const SizedBox(height: 32),
-                    _SectionHeader(title: 'サマリー', subtitle: '直近$_days日間'),
-                    const SizedBox(height: 16),
-                    _SummaryCards(summary: _summary),
-                    const SizedBox(height: 32),
-                    // 目標を追っていないときはセクションごと消える
-                    if (_goals.isNotEmpty) ...[
-                      _SectionHeader(
-                        title: '追跡中の目標',
-                        subtitle: '${_goals.length}件 / 直近$_days日間',
-                      ),
-                      const SizedBox(height: 16),
-                      // 見出しは1つに留め、目標ごとの区切りは罫線で表す。
-                      // _GoalProgressSection が先頭に目標名を出すので、同じ見出しを
-                      // 繰り返すと「追跡中の目標」が何度も並び、どこまでが1件か
-                      // 分からなくなる。
-                      for (var i = 0; i < _goals.length; i++) ...[
-                        if (i > 0) ...[
-                          const SizedBox(height: 24),
-                          Divider(height: 1, color: c.cardBorder),
-                          const SizedBox(height: 24),
-                        ],
-                        _GoalProgressSection(
-                          goal: _goals[i],
-                          entries: _goalEntries[_goals[i].id] ?? const [],
-                        ),
-                      ],
-                      const SizedBox(height: 32),
-                    ],
-                    if (_summary != null &&
-                        (_summary!.emotionDistribution.isNotEmpty ||
-                            _summary!.placeDistribution.isNotEmpty)) ...[
-                      _SectionHeader(title: '出来事の傾向', subtitle: '感情・場所の分布'),
-                      const SizedBox(height: 16),
-                      _DistributionCharts(summary: _summary!),
-                      const SizedBox(height: 32),
-                    ],
-                    _SectionHeader(title: '睡眠時間', subtitle: '直近$_days日間'),
-                    const SizedBox(height: 16),
-                    _SleepChart(dates: dates, sleepData: _sleepData),
-                    const SizedBox(height: 32),
-                    _SectionHeader(title: '活動記録', subtitle: '直近$_days日間'),
-                    const SizedBox(height: 16),
-                    _RecordsTable(
-                      dates: dates.reversed.toList(), // 新しい順
-                      entriesData: _entriesData,
-                      customQuestions: _settings?.customQuestions ?? [],
-                    ),
-                  ],
-                ),
-              ),
-            ),
     );
   }
 }
@@ -419,7 +398,12 @@ class _SectionHeader extends StatelessWidget {
           ).copyWith(fontSize: 18),
         ),
         const SizedBox(width: 8),
-        Text(subtitle, style: TextStyle(fontSize: 12, color: c.textSecondary)),
+        Flexible(
+          child: Text(
+            subtitle,
+            style: TextStyle(fontSize: 12, color: c.textSecondary),
+          ),
+        ),
       ],
     );
   }
@@ -504,11 +488,10 @@ class _SleepChart extends StatelessWidget {
                       return const SizedBox.shrink();
                     }
                     if (i % 2 != 0) return const SizedBox.shrink();
-                    final parts = dates[i].split('-');
                     return Transform.rotate(
                       angle: -0.4,
                       child: Text(
-                        '${parts[1]}/${parts[2]}',
+                        _shortDate(dates[i]),
                         style: TextStyle(fontSize: 9, color: c.textSecondary),
                       ),
                     );
@@ -527,10 +510,8 @@ class _SleepChart extends StatelessWidget {
                 getTooltipColor: (spot) => c.appBarBg,
                 getTooltipItem: (group, groupIndex, rod, rodIndex) {
                   if (rod.toY == 0) return null;
-                  final parts = dates[group.x].split('-');
-                  final label = '${parts[1]}/${parts[2]}';
                   return BarTooltipItem(
-                    '$label\n${rod.toY}h',
+                    '${_shortDate(dates[group.x])}\n${rod.toY}h',
                     TextStyle(color: c.appBarFg, fontSize: 12),
                   );
                 },
@@ -543,46 +524,37 @@ class _SleepChart extends StatelessWidget {
   }
 }
 
+// 'YYYY-MM-DD' → 'MM/DD'
+String _shortDate(String key) {
+  final parts = key.split('-');
+  return parts.length == 3 ? '${parts[1]}/${parts[2]}' : key;
+}
+
 // ────────────────────────────────────────────────────────────
-// 活動記録テーブル（食事・運動・勉強・カスタム質問）
+// 記録の一覧（行＝日付、列＝使っている記録項目）
 // ────────────────────────────────────────────────────────────
 class _RecordsTable extends StatelessWidget {
   // dates は新しい順（降順）
   final List<String> dates;
-  final Map<String, Map<String, dynamic>> entriesData;
-  final List<CustomQuestion> customQuestions;
+  final Map<String, Map<String, dynamic>> recordByDate;
+  final List<RecordField> fields;
 
   const _RecordsTable({
     required this.dates,
-    required this.entriesData,
-    required this.customQuestions,
+    required this.recordByDate,
+    required this.fields,
   });
 
-  static const _fixedHeaders = ['日付', '食事', '運動', '勉強'];
-  static const _fixedKeys = ['food', 'exercise', 'study'];
-
-  // 安定ID導入（#163）以前に保存された回答キー（例: custom_0, custom_1）の形式。
-  // 導入後のキーは custom_<uuid> であり数字のみにはならないため、これで新旧を判別できる。
-  static final _legacyCustomKeyPattern = RegExp(r'^custom_\d+$');
-
-  // カスタム質問ラベルを最大10文字に切り詰める
+  // 見出しを最大10文字に切り詰める
   String _truncate(String s, int max) =>
       s.length > max ? '${s.substring(0, max)}…' : s;
-
-  // その日の回答に、安定ID導入前の形式のカスタム質問キーが残っているか
-  // （#164: 質問の並び替え等で紐付けが変わっている可能性がある古いデータ）
-  bool _hasLegacyCustomAnswers(Map<String, dynamic>? answers) {
-    if (answers == null) return false;
-    return answers.keys.any((k) => _legacyCustomKeyPattern.hasMatch(k));
-  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final customHeaders = customQuestions
-        .map((q) => _truncate(q.text, 10))
-        .toList();
-    final allHeaders = [..._fixedHeaders, ...customHeaders];
+    if (fields.isEmpty) {
+      return const _EmptyCard(message: '記録する項目が設定されていない');
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -608,56 +580,37 @@ class _RecordsTable extends StatelessWidget {
           ),
           dataTextStyle: TextStyle(color: c.textSecondary, fontSize: 12),
           dividerThickness: 0.5,
-          columns: allHeaders.map((h) => DataColumn(label: Text(h))).toList(),
-          rows: dates.map((date) {
-            final answers =
-                entriesData[date]?['answers'] as Map<String, dynamic>?;
-            final parts = date.split('-');
-            final dateLabel = '${parts[1]}/${parts[2]}';
-            final hasLegacyCustomAnswers = _hasLegacyCustomAnswers(answers);
-
-            final fixedCells = [
-              DataCell(
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+          columns: [
+            const DataColumn(label: Text('日付')),
+            for (final field in fields)
+              DataColumn(label: Text(_truncate(field.label, 10))),
+          ],
+          rows: [
+            for (final date in dates)
+              DataRow(
+                cells: [
+                  DataCell(
                     Text(
-                      dateLabel,
+                      _shortDate(date),
                       style: TextStyle(
                         fontWeight: FontWeight.w600,
                         color: c.textPrimary,
                         fontSize: 12,
                       ),
                     ),
-                    if (hasLegacyCustomAnswers) ...[
-                      const SizedBox(width: 4),
-                      Tooltip(
-                        message:
-                            'この日のカスタム質問の回答は、質問の追加・削除・並べ替え'
-                            'によって現在の質問と正しく紐付いていない可能性があります',
-                        child: Icon(
-                          Icons.warning_amber_rounded,
-                          size: 14,
-                          color: c.gold,
+                  ),
+                  for (final field in fields)
+                    DataCell(
+                      _TableCell(
+                        value: formatValue(
+                          field,
+                          valueOf(recordByDate[date], field.id),
                         ),
                       ),
-                    ],
-                  ],
-                ),
+                    ),
+                ],
               ),
-              ..._fixedKeys.map((key) {
-                final val = answers?[key] as String?;
-                return DataCell(_TableCell(value: val));
-              }),
-            ];
-
-            final customCells = customQuestions.map((q) {
-              final val = answers?[q.answerKey] as String?;
-              return DataCell(_TableCell(value: val));
-            }).toList();
-
-            return DataRow(cells: [...fixedCells, ...customCells]);
-          }).toList(),
+          ],
         ),
       ),
     );
@@ -672,11 +625,8 @@ class _TableCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    if (value == null) {
-      return Text('—', style: TextStyle(color: c.textSecondary, fontSize: 12));
-    }
     return Text(
-      value!,
+      value ?? '—',
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(color: c.textSecondary, fontSize: 12),
@@ -685,16 +635,15 @@ class _TableCell extends StatelessWidget {
 }
 
 // ────────────────────────────────────────────────────────────
-// 解析サマリー：エントリ群を集計した結果を保持する
+// 解析サマリー：記録・日記を集計した結果を保持する
 // ────────────────────────────────────────────────────────────
 class _AnalyticsSummary {
   final double? avgSleep; // 記録された日のみ平均
   final double? exerciseRate; // 0.0–1.0
   final double? studyRate; // 0.0–1.0
-  final int streakDays; // 今日から遡る連続記録日数
-  final int recordedDays; // 期間内で1件以上記録された日数
-  final Map<String, int> emotionDistribution; // event_how 値別件数
-  final Map<String, int> placeDistribution; // event_where 値別件数
+  final int streakDays; // 今日（未記録なら昨日）から遡る連続記録日数
+  final int recordedDays; // 期間内で何か記録した日数
+  final Map<String, int> moodDistribution; // 今日の気分の値別件数
 
   _AnalyticsSummary({
     required this.avgSleep,
@@ -702,60 +651,42 @@ class _AnalyticsSummary {
     required this.studyRate,
     required this.streakDays,
     required this.recordedDays,
-    required this.emotionDistribution,
-    required this.placeDistribution,
+    required this.moodDistribution,
   });
 
   factory _AnalyticsSummary.from(
-    List<MapEntry<String, Map<String, dynamic>>> entries,
+    List<MapEntry<String, Map<String, dynamic>>> records,
+    List<MapEntry<String, Map<String, dynamic>>> diaries,
     List<String> dateRange,
   ) {
     final dateSet = dateRange.toSet();
-    final relevant = entries.where((e) => dateSet.contains(e.key)).toList();
+    final relevant = records.where((e) => dateSet.contains(e.key)).toList();
 
     final sleeps = <double>[];
     int exerciseDone = 0, exerciseRecorded = 0;
     int studyDone = 0, studyRecorded = 0;
-    final emotion = <String, int>{};
-    final place = <String, int>{};
+    final mood = <String, int>{};
 
     for (final e in relevant) {
-      final numeric = e.value['numericAnswers'] as Map<String, dynamic>?;
-      final answers = e.value['answers'] as Map<String, dynamic>?;
-      final sleep = numeric?['sleep'];
-      if (sleep is num) sleeps.add(sleep.toDouble());
+      final sleep = numberOf(e.value, kSleepFieldId);
+      if (sleep != null) sleeps.add(sleep);
 
-      final ex = answers?['exercise'] as String?;
-      if (ex != null && ex.isNotEmpty) {
+      final exercise = flagOf(e.value, kExerciseFieldId);
+      if (exercise != null) {
         exerciseRecorded++;
-        if (ex == 'した') exerciseDone++;
+        if (exercise) exerciseDone++;
       }
-      final st = answers?['study'] as String?;
-      if (st != null && st.isNotEmpty) {
+      final study = flagOf(e.value, kStudyFieldId);
+      if (study != null) {
         studyRecorded++;
-        if (st == 'した') studyDone++;
+        if (study) studyDone++;
       }
-      final how = answers?['event_how'] as String?;
-      if (how is String && how.isNotEmpty) {
-        emotion[how] = (emotion[how] ?? 0) + 1;
-      }
-      final where = answers?['event_where'] as String?;
-      if (where is String && where.isNotEmpty) {
-        place[where] = (place[where] ?? 0) + 1;
-      }
+      final m = textOf(e.value, kMoodFieldId);
+      if (m != null) mood[m] = (mood[m] ?? 0) + 1;
     }
 
-    // 今日から遡って連続して記録があった日数
-    final recordedSet = {for (final e in relevant) e.key};
-    int streak = 0;
-    for (int i = dateRange.length - 1; i >= 0; i--) {
-      if (recordedSet.contains(dateRange[i])) {
-        streak++;
-      } else {
-        break;
-      }
-    }
-
+    // ホームと同じ定義（記録か日記のどちらかがある日）で数える
+    final recorded = recordedDates(records, diaries);
     return _AnalyticsSummary(
       avgSleep: sleeps.isEmpty
           ? null
@@ -764,10 +695,9 @@ class _AnalyticsSummary {
           ? null
           : exerciseDone / exerciseRecorded,
       studyRate: studyRecorded == 0 ? null : studyDone / studyRecorded,
-      streakDays: streak,
-      recordedDays: recordedSet.length,
-      emotionDistribution: emotion,
-      placeDistribution: place,
+      streakDays: calcStreak(recorded, DateTime.now()),
+      recordedDays: recorded.where(dateSet.contains).length,
+      moodDistribution: mood,
     );
   }
 }
@@ -783,31 +713,24 @@ class _SummaryCards extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = summary;
     if (s == null || s.recordedDays == 0) {
-      return _EmptyCard(message: 'まだ記録が足りない');
+      return const _EmptyCard(message: 'まだ記録が足りない');
     }
 
+    String rate(double? r) => r == null ? '—' : '${(r * 100).round()}%';
     final cards = <Widget>[
       _StatCard(
         label: '平均睡眠',
         value: s.avgSleep == null ? '—' : '${s.avgSleep!.toStringAsFixed(1)}h',
       ),
-      _StatCard(
-        label: '運動実施率',
-        value: s.exerciseRate == null
-            ? '—'
-            : '${(s.exerciseRate! * 100).round()}%',
-      ),
-      _StatCard(
-        label: '勉強実施率',
-        value: s.studyRate == null ? '—' : '${(s.studyRate! * 100).round()}%',
-      ),
+      _StatCard(label: '運動実施率', value: rate(s.exerciseRate)),
+      _StatCard(label: '勉強実施率', value: rate(s.studyRate)),
       _StatCard(label: '連続記録', value: '${s.streakDays}日'),
     ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
         // 横幅に応じてカード幅を調整（最低160）
-        final spacing = 12.0;
+        const spacing = 12.0;
         final available = constraints.maxWidth;
         // 4列入るならそれ、入らないなら2列
         final cardWidth = available >= 4 * 160 + 3 * spacing
@@ -831,15 +754,12 @@ class _SummaryCards extends StatelessWidget {
 // 行動項目ごとに1枚ずつカードを出す。チェック項目は達成率、数値項目は最新値。
 // どちらも記録が無ければ「—」を出して「0%」「0」と区別する
 // ―― まだ測っていないことと、測って0だったことは意味が違う。
-//
-// 数値の推移グラフは MVP では作らない。睡眠用の _SleepChart は maxY 固定の
-// 睡眠専用で流用できず、汎用のグラフは項目ごとのスケール決めが要るため。
 // ────────────────────────────────────────────────────────────
 class _GoalProgressSection extends StatelessWidget {
   final Goal goal;
-  final List<MapEntry<String, Map<String, dynamic>>> entries;
+  final List<MapEntry<String, Map<String, dynamic>>> records;
 
-  const _GoalProgressSection({required this.goal, required this.entries});
+  const _GoalProgressSection({required this.goal, required this.records});
 
   @override
   Widget build(BuildContext context) {
@@ -869,9 +789,16 @@ class _GoalProgressSection extends StatelessWidget {
           elapsedLabel(goal, DateTime.now()),
           style: TextStyle(fontSize: 11, color: c.textSecondary),
         ),
+        if (stepLabel(goal) case final step?) ...[
+          const SizedBox(height: 4),
+          Text(
+            step,
+            style: TextStyle(fontSize: 12, color: c.textPrimary, height: 1.4),
+          ),
+        ],
         const SizedBox(height: 14),
         if (goal.actions.isEmpty)
-          _EmptyCard(message: '毎日する質問は設定されていない')
+          const _EmptyCard(message: '毎日記録する項目は設定されていない')
         else ...[
           LayoutBuilder(
             builder: (context, constraints) {
@@ -901,38 +828,29 @@ class _GoalProgressSection extends StatelessWidget {
           // 数値項目の推移。点が2つ以上ある項目だけ出す
           // （1点では推移にならず、最新値のカードで足りる）。
           for (final action in goal.numericActions)
-            if (_seriesFor(action).length >= 2) ...[
+            if (numericSeries(records, action.answerKey).length >= 2) ...[
               const SizedBox(height: 16),
-              _GoalNumericChart(action: action, series: _seriesFor(action)),
+              _NumericChart(
+                label: action.label,
+                unit: action.unit,
+                target: action.target,
+                series: numericSeries(records, action.answerKey),
+              ),
             ],
         ],
       ],
     );
   }
 
-  // 日付順（古い順）に並べた数値の記録。グラフの元データ。
-  List<({String date, double value})> _seriesFor(GoalAction action) {
-    final points = <({String date, double value})>[];
-    for (final entry in entries) {
-      final value = numericFor(entry.value, action.answerKey);
-      if (value != null) points.add((date: entry.key, value: value));
-    }
-    points.sort((a, b) => a.date.compareTo(b.date));
-    return points;
-  }
-
   // カードに出す値。記録が無ければ「—」。
   String _valueFor(GoalAction action) {
     if (action.isNumeric) {
-      final latest = latestNumeric(entries, action.answerKey);
+      final latest = latestNumeric(records, action.answerKey);
       if (latest == null) return '—';
-      // 整数で記録されたものに .0 を付けない（8000歩 を 8000.0歩 と出さない）
-      final text = latest == latest.roundToDouble()
-          ? latest.toStringAsFixed(0)
-          : latest.toStringAsFixed(1);
+      final text = formatNumber(latest);
       return action.unit.isEmpty ? text : '$text${action.unit}';
     }
-    final rate = checkRate(entries, action.answerKey);
+    final rate = checkRate(records, action.answerKey);
     if (rate == null) return '—';
     return '${(rate * 100).round()}%';
   }
@@ -942,36 +860,43 @@ class _GoalProgressSection extends StatelessWidget {
   // 「14日続けて達成」もどちらも100%になり、区別が付かない。
   String? _subFor(GoalAction action) {
     if (action.isNumeric) {
-      final count = _seriesFor(action).length;
+      final count = numericSeries(records, action.answerKey).length;
       return count == 0 ? null : '$count回の記録';
     }
-    final counts = checkCounts(entries, action.answerKey);
+    final counts = checkCounts(records, action.answerKey);
     return counts.answered == 0 ? null : '${counts.done} / ${counts.answered}日';
   }
 }
 
-// 数値項目の推移。
+// 数値項目の推移（目標の数値項目・カスタムの数値項目で共用）。
 //
 // 棒ではなく折れ線にしているのは、記録が無い日を素直に「点が無い」で表せるため。
 // 棒グラフだと未記録を 0 の高さで描くしかなく（睡眠グラフはそうしている）、
 // 「記録していない日」と「記録して0だった日」が混ざる。
 //
-// 縦軸は値から決める（core/chart_scale.dart）。睡眠用の _SleepChart は maxY を
-// 12 に固定しているが、目標の数値項目は体重・歩数・分数と桁が違うので流用できない。
-class _GoalNumericChart extends StatelessWidget {
-  final GoalAction action;
+// 縦軸は値から決める（core/chart_scale.dart）。体重・歩数・分数と桁が違うので、
+// 睡眠用の maxY 固定の棒グラフは流用できない。
+class _NumericChart extends StatelessWidget {
+  final String label;
+  final String unit;
+  final double? target;
   final List<({String date, double value})> series;
 
-  const _GoalNumericChart({required this.action, required this.series});
+  const _NumericChart({
+    required this.label,
+    required this.unit,
+    required this.target,
+    required this.series,
+  });
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final scale = numericChartScale(
       series.map((point) => point.value),
-      target: action.target,
+      target: target,
     );
-    final target = action.target;
+    final goalLine = target;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 16, 16, 12),
@@ -986,9 +911,7 @@ class _GoalNumericChart extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(left: 4),
             child: Text(
-              action.unit.isEmpty
-                  ? '${action.label} の推移'
-                  : '${action.label} の推移（${action.unit}）',
+              unit.isEmpty ? '$label の推移' : '$label の推移（$unit）',
               style: TextStyle(fontSize: 11, color: c.textSecondary),
             ),
           ),
@@ -1014,12 +937,12 @@ class _GoalNumericChart extends StatelessWidget {
                   ),
                 ],
                 // 目標値は破線で。線がグラフの外に出ないよう縦軸の範囲にも含めてある
-                extraLinesData: target == null
+                extraLinesData: goalLine == null
                     ? const ExtraLinesData()
                     : ExtraLinesData(
                         horizontalLines: [
                           HorizontalLine(
-                            y: target,
+                            y: goalLine,
                             color: c.textSecondary,
                             strokeWidth: 1,
                             dashArray: [4, 4],
@@ -1047,7 +970,7 @@ class _GoalNumericChart extends StatelessWidget {
                       interval: scale.interval,
                       reservedSize: 40,
                       getTitlesWidget: (value, meta) => Text(
-                        _axisLabel(value),
+                        formatNumber(value),
                         style: TextStyle(fontSize: 10, color: c.textSecondary),
                       ),
                     ),
@@ -1063,7 +986,6 @@ class _GoalNumericChart extends StatelessWidget {
                           return const SizedBox.shrink();
                         }
                         // 日付が詰まって読めなくなるので1つ飛ばしで出す
-                        // （_SleepChart の下軸と同じ流儀）
                         if (series.length > 6 && index % 2 != 0) {
                           return const SizedBox.shrink();
                         }
@@ -1072,7 +994,7 @@ class _GoalNumericChart extends StatelessWidget {
                           child: Transform.rotate(
                             angle: -0.4,
                             child: Text(
-                              _dateLabel(series[index].date),
+                              _shortDate(series[index].date),
                               style: TextStyle(
                                 fontSize: 9,
                                 color: c.textSecondary,
@@ -1090,17 +1012,6 @@ class _GoalNumericChart extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  // 軸ラベル。刻みが整数なら小数点を出さない（62 を 62.0 と書かない）。
-  String _axisLabel(double value) => value == value.roundToDouble()
-      ? value.toStringAsFixed(0)
-      : value.toStringAsFixed(1);
-
-  // 'YYYY-MM-DD' → 'MM/DD'
-  String _dateLabel(String key) {
-    final parts = key.split('-');
-    return parts.length == 3 ? '${parts[1]}/${parts[2]}' : key;
   }
 }
 
@@ -1145,51 +1056,16 @@ class _StatCard extends StatelessWidget {
 }
 
 // ────────────────────────────────────────────────────────────
-// 分布パイチャート：感情・場所の分布を並べる
+// 分布パイチャート
 // ────────────────────────────────────────────────────────────
-class _DistributionCharts extends StatelessWidget {
-  final _AnalyticsSummary summary;
-  const _DistributionCharts({required this.summary});
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 520;
-        final emotionChart = _PieCard(
-          title: '感情',
-          distribution: summary.emotionDistribution,
-        );
-        final placeChart = _PieCard(
-          title: '場所',
-          distribution: summary.placeDistribution,
-        );
-        if (isWide) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: emotionChart),
-              const SizedBox(width: 12),
-              Expanded(child: placeChart),
-            ],
-          );
-        }
-        return Column(
-          children: [emotionChart, const SizedBox(height: 12), placeChart],
-        );
-      },
-    );
-  }
-}
-
 class _PieCard extends StatelessWidget {
   final String title;
   final Map<String, int> distribution;
   const _PieCard({required this.title, required this.distribution});
 
   // 扇形の上のパーセント表示は labelColorOn()（app_colors.dart）で決める。
-  // 以前は白で固定していたため、明るい扇形（旧 #E7D6A8）では 1.44:1 まで落ちて
-  // パーセント表示が消えていた。分類が4種を超えると必ず読めない扇形が出る。
+  // 以前は白で固定していたため、明るい扇形では 1.44:1 まで落ちて
+  // パーセント表示が消えていた。
 
   @override
   Widget build(BuildContext context) {
@@ -1200,13 +1076,10 @@ class _PieCard extends StatelessWidget {
     final total = distribution.values.fold<int>(0, (a, b) => a + b);
     final sortedEntries = distribution.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
+    final palette = c.chartPalette;
     final sections = <PieChartSectionData>[];
     for (var i = 0; i < sortedEntries.length; i++) {
       final e = sortedEntries[i];
-      // パレットはテーマ側が持つ（明度に合わせて2セット用意されている）。
-      // 以前はこのファイルにハードコードしており、テーマを切り替えても
-      // 円グラフだけ配色が変わらなかった。
-      final palette = c.chartPalette;
       final color = palette[i % palette.length];
       sections.add(
         PieChartSectionData(
@@ -1252,11 +1125,8 @@ class _PieCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           // 凡例
-          ...sortedEntries.asMap().entries.map((e) {
-            final color = c.chartPalette[e.key % c.chartPalette.length];
-            final label = e.value.key;
-            final count = e.value.value;
-            return Padding(
+          for (var i = 0; i < sortedEntries.length; i++)
+            Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
@@ -1264,27 +1134,26 @@ class _PieCard extends StatelessWidget {
                     width: 10,
                     height: 10,
                     decoration: BoxDecoration(
-                      color: color,
+                      color: palette[i % palette.length],
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      label,
+                      sortedEntries[i].key,
                       style: TextStyle(fontSize: 11, color: c.textSecondary),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   Text(
-                    '$count',
+                    '${sortedEntries[i].value}',
                     style: TextStyle(fontSize: 11, color: c.textSecondary),
                   ),
                 ],
               ),
-            );
-          }),
+            ),
         ],
       ),
     );

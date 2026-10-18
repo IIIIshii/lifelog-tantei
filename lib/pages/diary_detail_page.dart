@@ -1,23 +1,26 @@
 import 'package:flutter/material.dart';
+
+import '../core/daily_record.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
+import '../models/record_field.dart';
 import '../services/firestore_service.dart';
 import 'diary_edit_page.dart';
 import 'diary_page.dart';
+import 'record_sheet_page.dart';
 
-// 特定の日の日記を事件報告書として全文表示する詳細ページ。
+// 特定の日の事件報告書。その日の日記本文と、日々の記録（事実）を1枚に並べる。
 //
-// 直し方は2通りある。本文を手で書き換える DiaryEditPage と、探偵の質問に
-// 答え直して生成しなおす DiaryPage。どちらも同じ重みで並べているのは、
-// 一字だけ直したいときと、記録そのものを取り直したいときで要るものが違うため。
+// 直し方は3通りある。本文を手で書き換える DiaryEditPage、探偵に聞き直して
+// まとめ直す DiaryPage、事実の方を直す RecordSheetPage。
 //
-// StatefulWidget なのは、どちらかで直して戻ってきたときに本文を取り直すため。
-// 一覧（DiaryListPage）は Firestore の snapshot を直接見ているので自動で追いつくが、
-// この画面は開いた時点の本文を受け取っているだけで、放っておくと古い文面が残る。
+// StatefulWidget なのは、どれかで直して戻ってきたときに読み直すため。
+// 一覧（事件簿アーカイブ）は snapshot を直接見ているので自動で追いつくが、
+// この画面は開いた時点の内容を持っているだけで、放っておくと古いまま残る。
 class DiaryDetailPage extends StatefulWidget {
   final String date; // 表示する日付（YYYY-MM-DD）
-  final String diary; // 表示する日記テキスト
-  final String uid; // 編集保存に必要なユーザーID
+  final String diary; // 一覧から受け取った本文（読み直すまでの表示に使う）
+  final String uid;
   final FirestoreService firestore;
 
   const DiaryDetailPage({
@@ -34,37 +37,68 @@ class DiaryDetailPage extends StatefulWidget {
 
 class _DiaryDetailPageState extends State<DiaryDetailPage> {
   late String _diary = widget.diary;
+  List<String> _topics = const [];
+  // その日の記録（記入済みの項目だけ、表に並んでいた順で）
+  List<({RecordField field, String value})> _facts = const [];
+  bool _loadingFacts = true;
 
-  // YYYY-MM-DD → YYYY年MM月DD日 に整形する（diary_list_pageと同じ形式）
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  // YYYY-MM-DD → YYYY年MM月DD日 に整形する（CaseArchiveTile と同じ形式）
   String _formatDate(String raw) {
     final parts = raw.split('-');
     if (parts.length != 3) return raw;
     return '${parts[0]}年${parts[1]}月${parts[2]}日';
   }
 
-  // 直しから戻ってきたときに本文を取り直す。
-  // 読めなかった場合は画面に出ている文面を保つ（空にして驚かせない）。
+  // 本文・出来事・記録を読み直す。
+  // 読めなかった場合は画面に出ている内容を保つ（空にして驚かせない）。
   Future<void> _reload() async {
     try {
-      final latest = await widget.firestore.getTodayDiary(
-        widget.uid,
-        widget.date,
-      );
-      if (!mounted || latest == null) return;
-      setState(() => _diary = latest);
+      final diaryFuture = widget.firestore.getDiary(widget.uid, widget.date);
+      final recordFuture = widget.firestore.getRecord(widget.uid, widget.date);
+      final fieldsFuture = widget.firestore.getFields(widget.uid);
+      final goalsFuture = widget.firestore.getAllGoals(widget.uid);
+      final diary = await diaryFuture;
+      final record = await recordFuture;
+      final fields = await fieldsFuture;
+      final goals = await goalsFuture;
+      if (!mounted) return;
+
+      // 使わなくなった項目・閉じた目標の項目も、その日に値があれば出す
+      // （過去の日の事実としては意味がある）
+      final index = fieldIndex(fields, [...goals.active, ...goals.closed]);
+      final facts = <({RecordField field, String value})>[];
+      for (final field in index.values) {
+        final text = formatValue(field, valueOf(record, field.id));
+        if (text != null) facts.add((field: field, value: text));
+      }
+
+      setState(() {
+        final text = (diary?['text'] as String?)?.trim();
+        if (text != null && text.isNotEmpty) _diary = text;
+        _topics =
+            (diary?['topics'] as List<dynamic>?)?.whereType<String>().toList() ??
+            const [];
+        _facts = facts;
+        _loadingFacts = false;
+      });
     } catch (_) {
-      // 表示は保ったままにする
+      if (mounted) setState(() => _loadingFacts = false);
     }
   }
 
-  // 本文を手で書き換える
   void _openEdit() {
     Navigator.push(
       context,
-      MaterialPageRoute<void>(
+      MaterialPageRoute<bool>(
         builder: (_) => DiaryEditPage(
           uid: widget.uid,
-          today: widget.date,
+          date: widget.date,
           firestore: widget.firestore,
           initialDiary: _diary,
         ),
@@ -73,12 +107,20 @@ class _DiaryDetailPageState extends State<DiaryDetailPage> {
   }
 
   // 探偵に聞き直して報告書を作り直す。
-  // 既に日記のある日なので、DiaryPage 側では今日の分と同じ
-  // 「追記する / いちから作り直す / 日記を確認する」の分岐に合流する。
+  // 既に日記のある日なので、聴取の側で「出来事を足す / 作り直す」を選ぶ。
   void _openRevisit() {
     Navigator.push(
       context,
       MaterialPageRoute<void>(builder: (_) => DiaryPage(date: widget.date)),
+    ).then((_) => _reload());
+  }
+
+  void _openRecord() {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => RecordSheetPage(uid: widget.uid, date: widget.date),
+      ),
     ).then((_) => _reload());
   }
 
@@ -88,9 +130,6 @@ class _DiaryDetailPageState extends State<DiaryDetailPage> {
     final displayDiary = _diary.trim().isEmpty ? '（本文なし）' : _diary;
     return Scaffold(
       backgroundColor: c.background,
-
-      // ── AppBar ──────────────────────────────────────────────
-      // 日付を整形して表示し、サブタイトルで「事件報告書」であることを示す
       appBar: AppBar(
         backgroundColor: c.appBarBg,
         foregroundColor: c.appBarFg,
@@ -113,92 +152,29 @@ class _DiaryDetailPageState extends State<DiaryDetailPage> {
           ],
         ),
       ),
-
-      // ── Body ────────────────────────────────────────────────
       body: Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: c.cardBg,
-                  borderRadius: BorderRadius.circular(4),
-                  // ゴールドの枠線でDiaryCardと同じ「重要書類」感を表現する
-                  border: Border.all(color: c.gold, width: 1.5),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── ヘッダー行（DiaryCardと同じデザイン） ────────
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border(bottom: BorderSide(color: c.gold)),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.description, color: c.gold, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            '事件報告書',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              color: c.gold,
-                              letterSpacing: 1.0,
-                            ),
-                          ),
-                          const Spacer(),
-                          // CLOSEDバッジ
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: c.gold),
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                            child: Text(
-                              'CLOSED',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: c.gold,
-                                letterSpacing: 1.5,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // ── 日記本文（全文表示） ──────────────────────────
-                    Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text(
-                        displayDiary,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: c.textPrimary,
-                          height: 1.8, // 行間を広めにとって読みやすくする
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _ReportCard(diary: displayDiary, topics: _topics),
+                  const SizedBox(height: 20),
+                  _FactsCard(
+                    loading: _loadingFacts,
+                    facts: _facts,
+                    onOpenRecord: _openRecord,
+                  ),
+                ],
               ),
             ),
           ),
 
-          // ── 直し方の2択 ──────────────────────────────────────
+          // ── 本文の直し方の2択 ────────────────────────────────
           // どちらが主とも決めていないので、同じ見た目で横に並べる。
-          // 一字だけ直したいときと、記録そのものを取り直したいときで
-          // 要るものが違い、どちらが多いとも言えないため。
+          // 一字だけ直したいときと、聞き直して書き直したいときで要るものが違うため。
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Row(
@@ -212,6 +188,210 @@ class _DiaryDetailPageState extends State<DiaryDetailPage> {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 日記本文のカード（DiaryCard と同じ「重要書類」のデザイン）。
+class _ReportCard extends StatelessWidget {
+  final String diary;
+  final List<String> topics;
+
+  const _ReportCard({required this.diary, required this.topics});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      decoration: BoxDecoration(
+        color: c.cardBg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: c.gold, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: c.gold)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.description, color: c.gold, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  '事件報告書',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: c.gold,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: c.gold),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                  child: Text(
+                    'CLOSED',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: c.gold,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 聴取で話した出来事。本文のどこに何が書かれているかの目次になる
+          if (topics.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final topic in topics)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: c.goldLight,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                      child: Text(
+                        topic,
+                        style: TextStyle(fontSize: 11, color: c.caseNumberFg),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Text(
+              diary,
+              style: TextStyle(fontSize: 16, color: c.textPrimary, height: 1.8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// その日の日々の記録。記入済みの項目を「名前 … 値」で並べる。
+class _FactsCard extends StatelessWidget {
+  final bool loading;
+  final List<({RecordField field, String value})> facts;
+  final VoidCallback onOpenRecord;
+
+  const _FactsCard({
+    required this.loading,
+    required this.facts,
+    required this.onOpenRecord,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Container(
+      decoration: BoxDecoration(
+        color: c.cardBg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: c.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 4, 6),
+            child: Row(
+              children: [
+                Icon(Icons.fact_check_outlined, color: c.gold, size: 16),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'この日の記録',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: c.gold,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: onOpenRecord,
+                  child: Text(
+                    '記録を直す',
+                    style: TextStyle(fontSize: 12, color: c.gold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: c.cardBorder),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+            child: loading
+                ? Text(
+                    '照会中…',
+                    style: TextStyle(fontSize: 13, color: c.textSecondary),
+                  )
+                : facts.isEmpty
+                ? Text(
+                    'この日の記録はまだ無い。',
+                    style: TextStyle(fontSize: 13, color: c.textSecondary),
+                  )
+                : Column(
+                    children: [
+                      for (final fact in facts)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: 120,
+                                child: Text(
+                                  fact.field.isGoal
+                                      ? '${fact.field.label}（目標）'
+                                      : fact.field.label,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: c.textSecondary,
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  fact.value,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: c.textPrimary,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
           ),
         ],
       ),

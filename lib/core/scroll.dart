@@ -8,9 +8,7 @@ import 'package:flutter/material.dart';
 // animateTo すると、伸びる前の終端まで送られて最後の発言が画面外に残る。
 // 2フレーム目に「まだ終端に届いていなければもう一度送る」を入れて追いつかせる。
 //
-// DiaryPage が private メソッドとして持っていたものをここへ出した。
-// 相談室（ConsultPage）は1段の弱い版を持っていて同じ取りこぼしが起きるので、
-// 会話を出す画面はこれを共有する。
+// 会話を出す画面（聴取・相談室）はこれを共有する。
 void scrollToBottom(ScrollController controller) {
   WidgetsBinding.instance.addPostFrameCallback((_) {
     if (!controller.hasClients) return;

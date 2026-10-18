@@ -92,7 +92,7 @@ class _TypewriterTextState extends State<TypewriterText>
           child: Stack(
             children: [
               // 全文のサイズで領域を先に確保しておく。タイプ中に高さが変動すると
-              // 呼び出し側のスクロール追従（DiaryPage の _scrollToBottom）が
+              // 呼び出し側のスクロール追従（core/scroll.dart の scrollToBottom）が
               // 最下端に届かなくなるため。
               Opacity(
                 opacity: 0,
