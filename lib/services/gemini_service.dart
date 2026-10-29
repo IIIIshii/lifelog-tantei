@@ -309,13 +309,16 @@ class GeminiService {
   // 依頼人が選んだ出来事について、深掘りの入口になる質問を1つ返させる。
   // 空応答のときは空文字を返す。代わりの問いはロールの文面で呼び出し側が出す
   // （人格の台詞は lib/roles/ に置き、サービス層には持たせない）。
+  //
+  // goalContext は追っている目標の続き具合（activeGoalsDigest）。空なら添えない。
   Future<String> generateTopicQuestion({
     required String topic,
     required String recordContext,
+    String goalContext = '',
   }) async {
     final prompt =
         '${AiInstructions.topicQuestionHint(roleFor(_role).interviewerInstruction)}\n\n'
-        '${DiaryPrompts.buildTopicQuestionPrompt(topic: topic, recordContext: recordContext)}';
+        '${DiaryPrompts.buildTopicQuestionPrompt(topic: topic, recordContext: recordContext, goalContext: goalContext)}';
     final response = await _questionModel.generateContent([
       Content.text(prompt),
     ]);
@@ -325,12 +328,22 @@ class GeminiService {
   // 1つの出来事についての会話を渡して、深掘り質問を生成させる。
   // 戻り値の sufficient が true の場合、これ以上の深掘りは不要（呼び出し側で打ち切る）。
   // JSONパースに失敗した場合は安全側に倒し、sufficient:true として扱う。
+  //
+  // recordContext は今日の記録、goalContext は追っている目標の続き具合。
+  // どちらも省けるが、記録を渡さないと「記録で分かる事実は聞き直さない」という
+  // 指示を守りようがない。
   Future<({bool sufficient, String question})> generateFollowUp(
-    List<Map<String, String>> messages,
-  ) async {
+    List<Map<String, String>> messages, {
+    String recordContext = '',
+    String goalContext = '',
+  }) async {
     final history = _buildHistory(messages);
+    final context = DiaryPrompts.followUpContext(
+      recordContext: recordContext,
+      goalContext: goalContext,
+    );
     final prompt =
-        '${AiInstructions.followUpHint(roleFor(_role).interviewerInstruction)}\n\n以下が依頼人の証言です：\n$history';
+        '${AiInstructions.followUpHint(roleFor(_role).interviewerInstruction)}\n\n$context以下が依頼人の証言です：\n$history';
     final response = await _interviewModel.generateContent([
       Content.text(prompt),
     ]);
@@ -446,6 +459,8 @@ class GeminiService {
     required String today,
     Goal? target,
     List<Goal> otherGoals = const [],
+    String progressDigest = '',
+    String pastGoalsDigest = '',
     int actionBudget = kMaxGoalActions,
     bool forcePropose = false,
   }) async {
@@ -463,6 +478,8 @@ class GeminiService {
           .map((goal) => goal.promptHeadline())
           .where((line) => line.isNotEmpty)
           .join('\n'),
+      progressDigest: progressDigest,
+      pastGoalsDigest: pastGoalsDigest,
     );
     final response = await _consultModel.generateContent([
       Content.text('$hint\n\n$body'),

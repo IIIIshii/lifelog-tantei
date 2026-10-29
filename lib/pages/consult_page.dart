@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/goal_digest.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
@@ -74,6 +75,11 @@ class _ConsultPageState extends State<ConsultPage> {
   // 今追っている目標すべて。行動項目の残り枠の計算に使う。
   List<Goal> _allGoals = const [];
 
+  // 追っている目標の直近の続き具合と、終えた目標の結末。AI が「前にどう続いたか」を
+  // 踏まえて、無理のない目標を一緒に考えるための材料。読めなかったときは空のまま。
+  String _progressDigest = '';
+  String _pastGoalsDigest = '';
+
   // この相談で採用できる行動項目の件数
   // （全目標合計の残り枠と、1目標あたりの上限の小さい方）
   int _slots = kMaxGoalActions;
@@ -109,10 +115,12 @@ class _ConsultPageState extends State<ConsultPage> {
     try {
       final settingsFuture = _firestore.getUserSettings(widget.uid);
       final selfAnalysisFuture = _firestore.getSelfAnalysis(widget.uid);
-      final goalsFuture = _firestore.getGoals(widget.uid);
+      final goalsFuture = _firestore.getAllGoals(widget.uid);
       final settings = await settingsFuture;
       final selfAnalysis = await selfAnalysisFuture;
-      final goals = await goalsFuture;
+      final allGoals = await goalsFuture;
+      final goals = allGoals.active;
+      await _loadDigests(goals, allGoals.closed);
       if (!mounted) return;
 
       // 一覧から渡された目標は、読み直した方で置き換える。
@@ -151,6 +159,19 @@ class _ConsultPageState extends State<ConsultPage> {
       if (!mounted) return;
       setState(() => _initializing = false);
       _showError('相談室を開けなかった: $e');
+    }
+  }
+
+  // 続き具合と結末の要約を作る。相談の補助でしかないので、失敗しても相談は始める。
+  Future<void> _loadDigests(List<Goal> active, List<Goal> closed) async {
+    try {
+      final recent = await _firestore.getRecentRecords(widget.uid, 14);
+      _progressDigest = activeGoalsDigest(active, recent, DateTime.now());
+      _pastGoalsDigest = closedGoalsDigest(closed);
+    } catch (e) {
+      debugPrint('目標の続き具合を読めなかった: $e');
+      _progressDigest = '';
+      _pastGoalsDigest = '';
     }
   }
 
@@ -209,6 +230,8 @@ class _ConsultPageState extends State<ConsultPage> {
         otherGoals: _allGoals
             .where((goal) => goal.id != target?.id)
             .toList(growable: false),
+        progressDigest: _progressDigest,
+        pastGoalsDigest: _pastGoalsDigest,
         actionBudget: _slots,
         forcePropose: forcePropose,
       );
