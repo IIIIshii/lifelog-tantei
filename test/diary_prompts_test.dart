@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nikkinext/models/goal.dart';
 import 'package:nikkinext/models/record_field.dart';
+import 'package:nikkinext/prompts/ai_instructions.dart';
 import 'package:nikkinext/prompts/diary_prompts.dart';
 
 // 所見・今日のコメント・聴取のプロンプトに、記録が「何の記録か」付きで載ることを検証する。
@@ -123,9 +124,32 @@ void main() {
       expect(prompt, contains('睡眠時間: 7時間'));
     });
 
+    test('記録は出来事に関係するものだけ使わせ、全部入れさせない', () {
+      final prompt = DiaryPrompts.buildDiaryPrompt(
+        '依頼人: 楽しかった',
+        recordContext: '- 睡眠時間: 7時間',
+      );
+      expect(prompt, contains('関係しないものは書かない'));
+      expect(prompt, isNot(contains('自然に織り込むこと')));
+    });
+
+    test('既存日記との統合でも、記録の使い方は同じ', () {
+      final prompt = DiaryPrompts.buildDiaryWithExistingPrompt(
+        '朝は散歩した',
+        '依頼人: 夜は読書した',
+        recordContext: '- 睡眠時間: 7時間',
+      );
+      expect(prompt, contains('関係しないものは書かない'));
+    });
+
     test('記録が無ければ記録の節を付けない', () {
       final prompt = DiaryPrompts.buildDiaryPrompt('依頼人: 楽しかった');
       expect(prompt, isNot(contains('【日々の記録')));
+    });
+
+    test('日記を書く指示にも、関係しない数字は書かないルールがある', () {
+      final rules = AiInstructions.diaryWriter('三人称で書く');
+      expect(rules, contains('関係しない項目は書かず'));
     });
   });
 }
