@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import '../core/goal_digest.dart';
 import '../core/goal_progress.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
@@ -8,6 +10,8 @@ import '../core/theme/detective_text_styles.dart';
 import '../models/goal.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
+import '../services/gemini_service.dart';
+import '../widgets/close_goal_dialog.dart';
 import '../widgets/goal_case_tile.dart';
 import '../widgets/section_label.dart';
 import 'consult_page.dart';
@@ -165,30 +169,15 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
   // 咎めないのと同じ方針。やめる判断そのものは依頼人のもの。
   Future<void> _closeGoal(Goal goal, GoalStatus status) async {
     final solved = status == GoalStatus.solved;
-    final confirmed = await showDialog<bool>(
+    // 下書きは待たずにダイアログを出し、できたら欄に入れる
+    final draft = _draftCloseReason(goal, status);
+    final reason = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(solved ? '事件を解決済みにするか？' : 'この事件の追跡をやめるか？'),
-        content: Text(
-          solved
-              ? '「${goal.title}」を解決済みとして記録する。'
-                    '日々の記録からこの事件の項目が外れる。これまでの記録は残る。'
-              : '「${goal.title}」を解決済みの事件へ移す。'
-                    '日々の記録から項目が外れるだけで、これまでの記録は残る。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('キャンセル'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(solved ? '解決にする' : '追跡をやめる'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) =>
+          CloseGoalDialog(goal: goal, solved: solved, draft: draft),
     );
-    if (confirmed != true || !mounted) return;
+    // キャンセル（または外側のタップ）は null。理由が空でも閉じてよいので空文字は通す
+    if (reason == null || !mounted) return;
 
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -197,6 +186,7 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
         goal,
         status,
         closedAt: dateKey(DateTime.now()),
+        closeReason: reason,
       );
     } catch (e) {
       if (!mounted) return;
@@ -206,6 +196,40 @@ class _ConsultHubPageState extends State<ConsultHubPage> {
     if (!mounted) return;
     await _load();
   }
+
+  // 終える理由の下書きを AI に作らせる。
+  //
+  // 補助でしかないので、失敗・遅れ・材料不足はすべて空文字にして、閉じる操作を止めない。
+  // 材料は、この目標の週ごとの継続と、最近の日記の抜粋だけ（理由を作り話で埋めさせない）。
+  Future<String> _draftCloseReason(Goal goal, GoalStatus status) async {
+    try {
+      final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
+      if (apiKey.isEmpty) return '';
+      final records = await _firestore.getRecentRecords(
+        widget.uid,
+        kContinuityDays,
+      );
+      final diaries = await _firestore.getRecentDiaries(widget.uid, 14);
+      final snippets = [
+        for (final entry in ([...diaries]..sort((a, b) => b.key.compareTo(a.key))).take(5))
+          _clip((entry.value['text'] as String?) ?? '', 120),
+      ].where((text) => text.isNotEmpty).toList();
+      return await GeminiService(apiKey, kDefaultRoleKey)
+          .draftCloseReason(
+            goal: goal,
+            status: status,
+            continuity: goalContinuityDigest([goal], records, DateTime.now()),
+            recentDiaries: snippets,
+          )
+          .timeout(const Duration(seconds: 15));
+    } catch (e) {
+      debugPrint('終える理由の下書きを作れなかった: $e');
+      return '';
+    }
+  }
+
+  String _clip(String text, int max) =>
+      text.length > max ? '${text.substring(0, max)}…' : text;
 
   @override
   Widget build(BuildContext context) {
@@ -537,15 +561,34 @@ class _ClosedGoalTile extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  goal.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: c.textSecondary,
-                    height: 1.4,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      goal.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: c.textSecondary,
+                        height: 1.4,
+                      ),
+                    ),
+                    // 終えるときに残した理由。あとから見返せるように一言だけ出す
+                    if (goal.closeReason.trim().isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        goal.closeReason.trim(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: c.textSecondary,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               const SizedBox(width: 10),

@@ -71,12 +71,66 @@ class GoalPrompts {
       buffer
         ..writeln('【これまでに終えた事件】')
         ..writeln(pastGoalsDigest)
-        ..writeln('なぜ終えたかは分かりません。推測で決めつけず、必要なら依頼人に尋ねてください。')
+        ..writeln('「理由:」が書かれているものは、それを踏まえてください。')
+        ..writeln('書かれていないものは、なぜ終えたかが分かりません。推測で決めつけず、必要なら依頼人に尋ねてください。')
         ..writeln('同じ狙いで断念した事件があるときは、前より小さく始める形を考えてください。')
         ..writeln();
     }
 
     buffer.write('以下が依頼人との会話です：\n$conversationHistory');
     return buffer.toString();
+  }
+
+  // 目標を終えるときの、理由の下書きを作るプロンプト。
+  //
+  // outcome は「解決した」「断念した」など、終え方の言葉。
+  // continuity は goalContinuityDigest の結果、recentDiaries は最近の日記の抜粋。
+  // 理由は推測になるので、材料はこの3つに限り、無ければブロックごと省く。
+  static String buildCloseReasonPrompt({
+    required String goalSummary,
+    required String outcome,
+    String continuity = '',
+    List<String> recentDiaries = const [],
+  }) {
+    final buffer = StringBuffer()
+      ..writeln('【終える目標】')
+      ..writeln(goalSummary)
+      ..writeln()
+      ..writeln('【終え方】')
+      ..writeln(outcome)
+      ..writeln();
+    if (continuity.isNotEmpty) {
+      buffer
+        ..writeln('【続き具合（週ごとの推移、左が古い週）】')
+        ..writeln(continuity)
+        ..writeln();
+    }
+    if (recentDiaries.isNotEmpty) {
+      buffer.writeln('【最近の日記】');
+      for (final diary in recentDiaries) {
+        buffer.writeln('- $diary');
+      }
+      buffer.writeln();
+    }
+    buffer.write('上の材料だけから、この目標を終える理由の下書きを書いてください。');
+    return buffer.toString();
+  }
+
+  // AI が返した理由の下書きを、保存・表示できる形に整える。
+  //
+  // 前後の空白と、全体を囲む引用符・かぎ括弧を外し、長すぎるものは切る。
+  // 切るのは、欄が1〜2文の一言メモを想定していて、長文が入ると読み返しにくいため。
+  static String cleanCloseReason(String raw, {int maxLength = 120}) {
+    var text = raw.trim();
+    const pairs = {'「': '」', '"': '"', '『': '』', '“': '”'};
+    for (final entry in pairs.entries) {
+      if (text.length >= 2 &&
+          text.startsWith(entry.key) &&
+          text.endsWith(entry.value)) {
+        text = text.substring(1, text.length - 1).trim();
+        break;
+      }
+    }
+    return text.length > maxLength ? text.substring(0, maxLength) : text;
   }
 }

@@ -215,7 +215,8 @@ void main() {
       );
       expect(prompt, contains('【追っている事件の続き具合】'));
       expect(prompt, contains('【これまでに終えた事件】'));
-      expect(prompt, contains('なぜ終えたかは分かりません'));
+      expect(prompt, contains('書かれていないものは、なぜ終えたかが分かりません'));
+      expect(prompt, contains('「理由:」が書かれているものは'));
       expect(
         prompt.indexOf('【これまでに終えた事件】'),
         lessThan(prompt.indexOf('依頼人: 走りたい')),
@@ -342,7 +343,7 @@ void main() {
       );
       expect(prompt, contains('【追っている目標の継続（週ごとの推移）】'));
       expect(prompt, contains('【これまでに終えた目標】'));
-      expect(prompt, contains('途切れた理由は決めつけず'));
+      expect(prompt, contains('「理由:」が書かれていればそれを使い、無いものは決めつけず'));
       expect(
         prompt.indexOf('【これまでに終えた目標】'),
         lessThan(prompt.indexOf('【依頼内容】')),

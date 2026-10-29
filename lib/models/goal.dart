@@ -276,6 +276,13 @@ class Goal {
   /// （Timestamp との変換は FirestoreService の仕事に留める）。
   final String closedAt;
 
+  /// 追跡を終えた理由（解決の手応え、断念した事情など）。書かなければ空文字。
+  ///
+  /// 「大きすぎたからやめた」と「興味がなくなったからやめた」は、続かなかった事実だけでは
+  /// 区別できず、自己理解の手がかりとしては意味が逆になる。そのため、終えるときに
+  /// 一言残せるようにしている。AI の下書きを利用者が直したものが入ることが多い。
+  final String closeReason;
+
   const Goal({
     this.id = '',
     this.title = '',
@@ -287,6 +294,7 @@ class Goal {
     this.createdAt = '',
     this.status = GoalStatus.active,
     this.closedAt = '',
+    this.closeReason = '',
   });
 
   // 未設定（まだ目標を立てていない）状態を返すファクトリ。
@@ -416,6 +424,7 @@ class Goal {
       createdAt: map['createdAt'] as String? ?? '',
       status: goalStatusFrom(map['status'] as String?),
       closedAt: map['closedAt'] as String? ?? '',
+      closeReason: map['closeReason'] as String? ?? '',
     );
   }
 
@@ -430,6 +439,7 @@ class Goal {
     'createdAt': createdAt,
     'status': goalStatusTo(status),
     'closedAt': closedAt,
+    'closeReason': closeReason,
   };
 
   // 一部のフィールドだけ変更した新しいインスタンスを返すメソッド
@@ -444,6 +454,7 @@ class Goal {
     String? createdAt,
     GoalStatus? status,
     String? closedAt,
+    String? closeReason,
   }) {
     return Goal(
       id: id ?? this.id,
@@ -456,6 +467,7 @@ class Goal {
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
       closedAt: closedAt ?? this.closedAt,
+      closeReason: closeReason ?? this.closeReason,
     );
   }
 

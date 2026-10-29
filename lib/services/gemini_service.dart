@@ -464,6 +464,42 @@ class GeminiService {
   }
 
   // ──────────────────────────────────────────────────────────────
+  // 目標を終える
+  // ──────────────────────────────────────────────────────────────
+
+  // 目標を終えるときの、理由の下書きを作る。1〜2文で、材料に根拠が無ければ空文字。
+  //
+  // 利用者に理由を書かせず、先に下書きを出して、合っていれば何もしなくてよい形にする。
+  // 下書きは補助なので、失敗・空応答は空文字で返し、呼び出し側は欄を空のまま出す
+  // （閉じる操作を止めない）。人格は使わない（後から読み返す記録のため）。
+  Future<String> draftCloseReason({
+    required Goal goal,
+    required GoalStatus status,
+    String continuity = '',
+    List<String> recentDiaries = const [],
+  }) async {
+    // 理由の下書きは呼び出しが稀なので、専用のモデルをその都度作る
+    final model = GenerativeModel(
+      model: 'gemini-2.5-flash',
+      apiKey: _apiKey,
+      systemInstruction: Content.system(AiInstructions.closeReasonDrafter()),
+    );
+    final outcome = switch (status) {
+      GoalStatus.solved => '解決した（目標を達成できた）',
+      GoalStatus.abandoned => '断念した（追跡をやめた）',
+      _ => '追跡を終えた',
+    };
+    final prompt = GoalPrompts.buildCloseReasonPrompt(
+      goalSummary: goal.promptSummary(),
+      outcome: outcome,
+      continuity: continuity,
+      recentDiaries: recentDiaries,
+    );
+    final response = await model.generateContent([Content.text(prompt)]);
+    return GoalPrompts.cleanCloseReason(response.text ?? '');
+  }
+
+  // ──────────────────────────────────────────────────────────────
   // 相談室
   // ──────────────────────────────────────────────────────────────
 
