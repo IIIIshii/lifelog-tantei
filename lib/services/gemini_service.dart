@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../core/daily_record.dart';
+import '../core/period_stats.dart';
 import '../models/goal.dart';
 import '../models/record_field.dart';
 import '../models/self_analysis.dart';
@@ -397,11 +398,28 @@ class GeminiService {
   // 直近の日々（mergeDays の結果）から所見テキストを生成させる。
   // fields: 値のキー → 記録項目。記録には項目 id しか入っていないため、
   // 渡さないとカスタム項目・目標の値は所見の材料から落ちる。
+  //
+  // today を渡すと、periodDays 日間の集計（平均・前半と後半の差・できた日数など）を
+  // コードで出して添える。省くと、従来どおり記録の文章だけを渡す。
   Future<String> generateAnalysis(
     List<MapEntry<String, Map<String, dynamic>>> days, {
     Map<String, RecordField> fields = const {},
+    DateTime? today,
+    int periodDays = 14,
   }) async {
-    final prompt = DiaryPrompts.buildAnalysisPrompt(days, fields: fields);
+    final statsBlock = today == null
+        ? ''
+        : summarizePeriod(
+            days,
+            fields,
+            end: today,
+            periodDays: periodDays,
+          ).toPromptBlock();
+    final prompt = DiaryPrompts.buildAnalysisPrompt(
+      days,
+      fields: fields,
+      statsBlock: statsBlock,
+    );
     final response = await _analysisModel.generateContent([
       Content.text(prompt),
     ]);
