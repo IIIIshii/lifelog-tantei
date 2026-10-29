@@ -10,7 +10,7 @@ void main() {
       expect(resolveLocation('America/New_York').name, 'America/New_York');
     });
 
-    test("端末が返す 'GMT' は一覧に無いので、フォールバックを返す（issue #193）", () {
+    test("端末が返す 'GMT' は一覧に無いので、フォールバックを返す", () {
       expect(resolveLocation('GMT').name, fallbackTimeZoneName);
     });
 
