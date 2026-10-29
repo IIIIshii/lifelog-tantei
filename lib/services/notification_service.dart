@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import '../core/timezone_resolver.dart';
 
 class NotificationService {
   static final instance = NotificationService._();
@@ -11,8 +13,14 @@ class NotificationService {
 
   Future<void> initialize() async {
     tz.initializeTimeZones();
-    final timeZoneName = await FlutterTimezone.getLocalTimezone();
-    tz.setLocalLocation(tz.getLocation(timeZoneName));
+    // 通知は補助機能なので、ゾーンを取れなくても起動は止めない。
+    String? timeZoneName;
+    try {
+      timeZoneName = await FlutterTimezone.getLocalTimezone();
+    } catch (e) {
+      debugPrint('端末のタイムゾーンを取得できませんでした: $e');
+    }
+    tz.setLocalLocation(resolveLocation(timeZoneName));
 
     const androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
