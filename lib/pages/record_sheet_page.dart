@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import '../core/auto_fill.dart';
 import '../core/daily_record.dart';
 import '../core/goal_progress.dart';
 import '../core/streak.dart';
@@ -67,6 +68,10 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
   List<Goal> _goals = const [];
   final Map<String, Object?> _values = {};
 
+  // 聴取の会話から AI が自動で入れた項目の id。利用者が値を直す・消すと外れて、
+  // 利用者の入力として扱う。
+  final Set<String> _autoFilled = {};
+
   // まだ書き込んでいない変更（項目 id → 値。null は消す）
   final Map<String, Object?> _pending = {};
   Timer? _saveTimer;
@@ -123,6 +128,9 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
       }
       _controllers.clear();
       _values.clear();
+      _autoFilled
+        ..clear()
+        ..addAll(autoFilledIds(record));
       for (final field in rows) {
         final value = valueOf(record, field.id);
         _values[field.id] = value;
@@ -163,7 +171,14 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
   // 値を変える。テキスト・数値は打ち終わりを待ち、選ぶだけの項目はすぐ書く。
   void _set(RecordField field, Object? raw, {bool immediate = false}) {
     final value = normalizeInput(field, raw);
-    setState(() => _values[field.id] = value);
+    // 利用者が触った項目は、自動で入れたものではなく利用者の入力になる
+    final wasAuto = _autoFilled.contains(field.id);
+    setState(() {
+      _values[field.id] = value;
+      _autoFilled.remove(field.id);
+    });
+    // 空に戻した（＝自動入力を取り消した）なら、その日はもう自動で埋めない
+    if (wasAuto) _clearAutoMarks([field.id], rejected: value == null);
     _pending[field.id] = value;
     _saveTimer?.cancel();
     if (immediate) {
@@ -171,6 +186,22 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
     } else {
       _saveTimer = Timer(_saveDelay, _flush);
     }
+  }
+
+  // 「自動で入れた」印を保存側から外す。表示は呼び出し側で先に更新している。
+  void _clearAutoMarks(List<String> ids, {bool rejected = false}) {
+    final date = _dateKey;
+    _firestore
+        .clearAutoFilledMarks(widget.uid, date, ids, rejected: rejected)
+        .catchError((Object e) {
+          debugPrint('自動入力の印を外せなかった: $e');
+        });
+  }
+
+  // 自動で入れた値を消して、空に戻す。
+  void _clearAutoFilledValue(RecordField field) {
+    _controllers[field.id]?.clear();
+    _set(field, null, immediate: true);
   }
 
   void _flush() {
@@ -209,7 +240,10 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
     );
     if (accepted == null || accepted.isEmpty || !mounted) return;
 
+    // 確認して入れた値は利用者の入力。自動で入れた印が付いていた項目は外す
+    final overwrittenAuto = accepted.keys.where(_autoFilled.contains).toList();
     setState(() {
+      _autoFilled.removeAll(accepted.keys);
       for (final entry in accepted.entries) {
         _values[entry.key] = entry.value;
         _pending[entry.key] = entry.value;
@@ -224,6 +258,7 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
       }
     });
     _flush();
+    _clearAutoMarks(overwrittenAuto);
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('${accepted.length}件を表に入れた')));
@@ -406,6 +441,22 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
                     ),
                   ),
                 ),
+                // 聴取の会話から AI が入れた値。違っていたら、ここで消せる
+                if (_autoFilled.contains(field.id)) ...[
+                  Text(
+                    'AIが入力',
+                    style: TextStyle(fontSize: 11, color: c.textSecondary),
+                  ),
+                  TextButton(
+                    onPressed: () => _clearAutoFilledValue(field),
+                    style: TextButton.styleFrom(
+                      foregroundColor: c.textSecondary,
+                      minimumSize: const Size(44, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    child: const Text('消す', style: TextStyle(fontSize: 12)),
+                  ),
+                ],
                 if (filled)
                   Icon(Icons.check_circle, size: 16, color: c.gold)
                 else
