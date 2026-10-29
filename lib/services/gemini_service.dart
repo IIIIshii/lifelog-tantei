@@ -414,11 +414,16 @@ class GeminiService {
   //
   // today を渡すと、periodDays 日間の集計（平均・前半と後半の差・できた日数など）を
   // コードで出して添える。省くと、従来どおり記録の文章だけを渡す。
+  //
+  // goalContinuity / closedGoals は、目標の週ごとの推移と、終えた目標の結末
+  // （goal_digest.dart）。直近14日では見えない、目標が続いた期間と途切れた時期を読ませる。
   Future<String> generateAnalysis(
     List<MapEntry<String, Map<String, dynamic>>> days, {
     Map<String, RecordField> fields = const {},
     DateTime? today,
     int periodDays = 14,
+    String goalContinuity = '',
+    String closedGoals = '',
   }) async {
     final statsBlock = today == null
         ? ''
@@ -432,6 +437,8 @@ class GeminiService {
       days,
       fields: fields,
       statsBlock: statsBlock,
+      goalContinuity: goalContinuity,
+      closedGoals: closedGoals,
     );
     final response = await _analysisModel.generateContent([
       Content.text(prompt),

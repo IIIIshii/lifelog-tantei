@@ -5,6 +5,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import '../core/chart_scale.dart';
 import '../core/daily_record.dart';
+import '../core/goal_digest.dart';
 import '../core/goal_progress.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
@@ -145,6 +146,34 @@ class _AnalyticsViewState extends State<AnalyticsView>
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  // 所見の材料に足す、目標まわりの情報を作る。
+  //
+  // - index: 終えた目標の項目も含めた対応表。直近14日に終えた目標の値が
+  //   所見の材料から落ちないようにする（画面の表示用の _fieldIndex は追跡中だけ）。
+  // - continuity: 追跡中の目標の週ごとの推移（直近8週間）。14日では見えない
+  //   「いつ途切れたか」を読ませる。
+  // - closed: 終えた目標の結末。
+  //
+  // 所見の補助でしかないので、読めなかったときは従来どおりの材料で所見を作る。
+  Future<({Map<String, RecordField> index, String continuity, String closed})>
+  _goalMaterial() async {
+    try {
+      final all = await _firestore.getAllGoals(widget.uid);
+      final records = await _firestore.getRecentRecords(
+        widget.uid,
+        kContinuityDays,
+      );
+      return (
+        index: fieldIndex(_fields, [...all.active, ...all.closed]),
+        continuity: goalContinuityDigest(all.active, records, DateTime.now()),
+        closed: closedGoalsDigest(all.closed),
+      );
+    } catch (e) {
+      debugPrint('目標の継続を読めなかった: $e');
+      return (index: _fieldIndex, continuity: '', closed: '');
+    }
+  }
+
   Future<void> _generateAnalysis() async {
     if (_isGeneratingAnalysis) return;
     final days = _mergedDays;
@@ -159,11 +188,14 @@ class _AnalyticsViewState extends State<AnalyticsView>
     }
     setState(() => _isGeneratingAnalysis = true);
     try {
+      final goalMaterial = await _goalMaterial();
       final text = await gemini.generateAnalysis(
         days,
-        fields: _fieldIndex,
+        fields: goalMaterial.index,
         today: DateTime.now(),
         periodDays: _days,
+        goalContinuity: goalMaterial.continuity,
+        closedGoals: goalMaterial.closed,
       );
       await _firestore.addAnalysis(
         widget.uid,

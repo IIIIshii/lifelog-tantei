@@ -133,25 +133,44 @@ class DiaryPrompts {
   // fields: 値のキー → 記録項目（fieldIndex の結果）。ここに無いキーの値は渡さない。
   // statsBlock: PeriodSummary.toPromptBlock() の結果。平均や増減を AI に暗算させず、
   //   コードで数えた値を渡すためのもの。空ならブロックごと省く。
+  // goalContinuity: 追跡中の目標の週ごとの推移（goalContinuityDigest）。
+  //   直近14日の記録だけでは見えない、続いた期間と途切れた時期を読ませるためのもの。
+  // closedGoals: 終えた目標の結末（closedGoalsDigest）。
   static String buildAnalysisPrompt(
     List<MapEntry<String, Map<String, dynamic>>> days, {
     Map<String, RecordField> fields = const {},
     String statsBlock = '',
+    String goalContinuity = '',
+    String closedGoals = '',
   }) {
     final sorted = [...days]..sort((a, b) => a.key.compareTo(b.key));
     final body = _formatDays(sorted, fields);
     final stats = statsBlock.isEmpty ? '' : '$statsBlock\n\n';
+    final goalBlocks = StringBuffer();
+    if (goalContinuity.isNotEmpty) {
+      goalBlocks.write('【追っている目標の継続（週ごとの推移）】\n$goalContinuity\n\n');
+    }
+    if (closedGoals.isNotEmpty) {
+      goalBlocks.write('【これまでに終えた目標】\n$closedGoals\n\n');
+    }
     final evidence = statsBlock.isEmpty
         ? ''
         : '数字は【集計】の値をそのまま使い、所見の根拠になった日付や値を添えること。\n';
+    // 理由は記録されていない。続かなかった理由を AI が作り話で埋めないようにする
+    final goalAsk = goalBlocks.isEmpty
+        ? ''
+        : '目標については、週ごとの推移から、続いた期間と途切れた時期を具体的に書くこと。'
+              '途切れた理由は決めつけず、分からないときは分からないと書く。\n';
 
     return '以下は依頼人の直近${sorted.length}日分の事件簿である。\n\n'
         '$body\n\n'
         '$stats'
+        '$goalBlocks'
         '【依頼内容】\n'
         'この記録群を読み返し、以下3節で所見をまとめてください。各節は2〜4文、'
         '全体で400字以内に収めること。見出しは出力に含めること。\n'
         '$evidence'
+        '$goalAsk'
         '■所見（全体傾向）\n'
         '■気になる兆候（パターン・繰り返し・変化）\n'
         '■励まし（光っている取り組みへの一言）';

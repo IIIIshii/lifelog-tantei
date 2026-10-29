@@ -228,4 +228,132 @@ void main() {
       expect(prompt, isNot(contains('終えた事件')));
     });
   });
+
+  group('goalContinuityDigest（週ごとの推移）', () {
+    final week3End = DateTime(2026, 10, 21); // 着手日 10/01 から21日目＝ちょうど3週間
+
+    test('着手日から7日ずつに区切り、週ごとの達成日数/記録日数を並べる', () {
+      final digest = goalContinuityDigest(
+        [goal],
+        [
+          // 1週目（10/01〜10/07）: 4日記録、3日達成
+          record('2026-10-01', {'goal_gym': true}),
+          record('2026-10-02', {'goal_gym': true}),
+          record('2026-10-03', {'goal_gym': false}),
+          record('2026-10-05', {'goal_gym': true}),
+          // 2週目（10/08〜10/14）: 2日記録、2日達成
+          record('2026-10-09', {'goal_gym': true}),
+          record('2026-10-12', {'goal_gym': true}),
+          // 3週目（10/15〜10/21）: 記録なし
+        ],
+        week3End,
+      );
+      expect(digest, contains('目標「3ヶ月で5kg減らす」（着手から20日）'));
+      expect(digest, contains('「ジムに行く」: 週ごとの達成日数/記録日数 3/4 → 2/2 → 0/0'));
+    });
+
+    test('数値型は、週ごとに値を記録した日数を並べる', () {
+      final digest = goalContinuityDigest(
+        [goal],
+        [
+          record('2026-10-02', {'goal_weight': 63.0}),
+          record('2026-10-06', {'goal_weight': 62.8}),
+          record('2026-10-10', {'goal_weight': 62.5}),
+        ],
+        week3End,
+      );
+      expect(digest, contains('「体重」: 週ごとの記録日数 2 → 1 → 0'));
+    });
+
+    test('着手日より前の記録は数えない', () {
+      final digest = goalContinuityDigest(
+        [goal],
+        [
+          record('2026-09-30', {'goal_gym': true}), // 着手の前日
+          record('2026-10-01', {'goal_gym': true}), // 着手日
+        ],
+        week3End,
+      );
+      // 前日の分が入っていれば 2/2 になる
+      expect(digest, contains('1/1 → 0/0 → 0/0'));
+    });
+
+    test('最後の週が途中なら、何日分かを添える', () {
+      final digest = goalContinuityDigest(
+        [goal],
+        const [],
+        DateTime(2026, 10, 18), // 18日分＝2週と4日
+      );
+      expect(digest, contains('左が古い週。最後の週は4日分'));
+      expect(digest, contains('0/0 → 0/0 → 0/0'));
+    });
+
+    test('古い目標は、直近8週間だけを振り返る', () {
+      const old = Goal(
+        id: 'old',
+        title: '半年前に始めた目標',
+        createdAt: '2026-05-01',
+        actions: [gym],
+      );
+      final digest = goalContinuityDigest(
+        [old],
+        [
+          record('2026-08-26', {'goal_gym': true}), // 8週間の1日前
+          record('2026-08-27', {'goal_gym': true}), // 8週間の最初の日
+        ],
+        week3End,
+      );
+      expect(digest, contains('1/1 → 0/0 → 0/0 → 0/0 → 0/0 → 0/0 → 0/0 → 0/0'));
+    });
+
+    test('着手日が無い目標は、直近8週間として扱い、そう書く', () {
+      const undated = Goal(id: 'u', title: '日付なし', actions: [gym]);
+      final digest = goalContinuityDigest([undated], const [], week3End);
+      expect(digest, contains('着手日は記録されていない'));
+    });
+
+    test('行動項目の無い目標・題の無い目標は載せない', () {
+      const noActions = Goal(id: 'n', title: '項目なし', createdAt: '2026-10-01');
+      expect(goalContinuityDigest([noActions], const [], week3End), '');
+      expect(goalContinuityDigest([const Goal()], const [], week3End), '');
+    });
+
+    test('同じ入力なら同じ文になる', () {
+      final records = [
+        record('2026-10-02', {'goal_gym': true}),
+      ];
+      expect(
+        goalContinuityDigest([goal], records, week3End),
+        goalContinuityDigest([goal], records, week3End),
+      );
+    });
+  });
+
+  group('所見のプロンプトへの目標の差し込み', () {
+    final days = [
+      MapEntry('2026-10-20', <String, dynamic>{'diary': '走った'}),
+    ];
+
+    test('継続と終えた目標が、集計のあと・依頼の前に付き、理由を決めつけさせない', () {
+      final prompt = DiaryPrompts.buildAnalysisPrompt(
+        days,
+        goalContinuity: '- 目標「走る」',
+        closedGoals: '- 目標「毎朝走る」: 断念した',
+      );
+      expect(prompt, contains('【追っている目標の継続（週ごとの推移）】'));
+      expect(prompt, contains('【これまでに終えた目標】'));
+      expect(prompt, contains('途切れた理由は決めつけず'));
+      expect(
+        prompt.indexOf('【これまでに終えた目標】'),
+        lessThan(prompt.indexOf('【依頼内容】')),
+      );
+    });
+
+    test('目標の材料が無ければ、従来どおりの形のまま', () {
+      final prompt = DiaryPrompts.buildAnalysisPrompt(days);
+      expect(prompt, isNot(contains('目標の継続')));
+      expect(prompt, isNot(contains('終えた目標')));
+      expect(prompt, isNot(contains('決めつけず')));
+    });
+  });
 }
