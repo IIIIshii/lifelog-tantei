@@ -34,14 +34,28 @@ class NotificationService {
 
     await _plugin.initialize(settings: settings);
 
-    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    await androidPlugin?.requestNotificationsPermission();
-    await androidPlugin?.requestExactAlarmsPermission();
+    // 「正確な時刻のアラーム」の許可は、ここでは聞かない。聞くとシステムの設定画面が
+    // 起動のたびに開き、ホームを見る前に飛ばされる。通知をオンにする schedule() で聞く。
+    await _androidPlugin?.requestNotificationsPermission();
+  }
+
+  AndroidFlutterLocalNotificationsPlugin? get _androidPlugin =>
+      _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+
+  /// 正確な時刻のアラームを使えるか。使えなければ許可を一度だけ頼む。
+  /// Android 以外では常に true（予約の方式を選ぶ必要がない）。
+  Future<bool> _ensureExactAlarmPermission() async {
+    final android = _androidPlugin;
+    if (android == null) return true;
+    if (await android.canScheduleExactNotifications() ?? false) return true;
+    await android.requestExactAlarmsPermission();
+    return await android.canScheduleExactNotifications() ?? false;
   }
 
   Future<void> schedule(int hour, int minute) async {
     await cancel();
+    final canUseExact = await _ensureExactAlarmPermission();
 
     final now = tz.TZDateTime.now(tz.local);
     var scheduled =
@@ -68,7 +82,11 @@ class NotificationService {
       body: '今日の出来事を記録してください',
       scheduledDate: scheduled,
       notificationDetails: details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      // 許可がないのに exact で予約すると例外になる。断られても通知は届くよう、
+      // その場合は時刻に幅を持たせる方式に落とす。
+      androidScheduleMode: canUseExact
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
     );
   }
