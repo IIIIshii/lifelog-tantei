@@ -16,10 +16,17 @@ class GoalPrompts {
   // otherGoalsSummary には、ほかに追っている目標の Goal.promptHeadline() を
   // 改行で繋いで渡す。全文ではなく1行ずつにするのは、複数目標ぶんの要約で
   // プロンプトの大半が埋まり、肝心の会話が埋もれるのを避けるため。
+  //
+  // progressDigest には追跡中の目標の直近の続き具合（activeGoalsDigest）、
+  // pastGoalsDigest には終えた目標の結末（closedGoalsDigest）を渡す。
+  // どちらも「前にどう続いたか」を踏まえて、無理のない目標を一緒に考えるための材料で、
+  // 空ならブロックごと省く。
   static String buildConsultPrompt(
     String conversationHistory, {
     String targetGoalSummary = '',
     String otherGoalsSummary = '',
+    String progressDigest = '',
+    String pastGoalsDigest = '',
     String today = '',
   }) {
     final buffer = StringBuffer();
@@ -49,6 +56,23 @@ class GoalPrompts {
         ..writeln('【ほかに追っている事件】')
         ..writeln(otherGoalsSummary)
         ..writeln('これらと同じ狙いの事件を新しく立てないでください。')
+        ..writeln();
+    }
+
+    if (progressDigest.isNotEmpty) {
+      buffer
+        ..writeln('【追っている事件の続き具合】')
+        ..writeln(progressDigest)
+        ..writeln('続いていない項目があっても責めず、無理のない形に見直す材料にしてください。')
+        ..writeln();
+    }
+
+    if (pastGoalsDigest.isNotEmpty) {
+      buffer
+        ..writeln('【これまでに終えた事件】')
+        ..writeln(pastGoalsDigest)
+        ..writeln('なぜ終えたかは分かりません。推測で決めつけず、必要なら依頼人に尋ねてください。')
+        ..writeln('同じ狙いで断念した事件があるときは、前より小さく始める形を考えてください。')
         ..writeln();
     }
 

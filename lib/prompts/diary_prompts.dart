@@ -74,13 +74,35 @@ class DiaryPrompts {
   }
 
   // 出来事への最初の質問のプロンプト本文（隠し指示は呼び出し側で前に足す）。
+  // goalContext: 追っている目標の続き具合（goal_digest.dart の activeGoalsDigest）。
   static String buildTopicQuestionPrompt({
     required String topic,
     required String recordContext,
+    String goalContext = '',
   }) {
     final record = recordContext.isEmpty ? '' : '\n\n【今日の記録】\n$recordContext';
-    return '依頼人が話したい出来事：$topic$record';
+    return '依頼人が話したい出来事：$topic$record${_goalBlock(goalContext)}';
   }
+
+  // 深掘りの質問に添える参考情報。記録も目標も無ければ空文字。
+  //
+  // 深掘りの指示は「記録で分かる事実は聞き直さない」と書いているのに、
+  // 以前はこの質問に記録そのものが渡っていなかった。ここで合わせて渡す。
+  static String followUpContext({
+    String recordContext = '',
+    String goalContext = '',
+  }) {
+    final record = recordContext.isEmpty ? '' : '【今日の記録】\n$recordContext\n\n';
+    final goal = goalContext.isEmpty ? '' : '${_goalBlock(goalContext).trimLeft()}\n\n';
+    return '$record$goal';
+  }
+
+  // 目標の続き具合の節。質問に「責める」「急かす」材料として使わせないための注意を添える。
+  // 続かないことも、自己理解の手がかりとして中立に扱う。
+  static String _goalBlock(String goalContext) => goalContext.isEmpty
+      ? ''
+      : '\n\n【追っている目標と続き具合】\n$goalContext\n'
+            '（話に関係するときだけ触れる。続いていないことを責めたり、急かしたりしない）';
 
   // 話した内容を記録の表へ振り分けるプロンプト。
   //
