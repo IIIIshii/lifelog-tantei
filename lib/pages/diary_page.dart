@@ -6,6 +6,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import '../core/auto_fill.dart';
 import '../core/daily_record.dart';
+import '../core/feeling_cues.dart';
 import '../core/goal_digest.dart';
 import '../core/scroll.dart';
 import '../core/streak.dart';
@@ -513,6 +514,7 @@ class _DiaryPageState extends State<DiaryPage> {
       scrollToBottom(_scrollController);
       // 日記の確認を待たせないよう、表の自動入力は裏で走らせる
       unawaited(_autoFillRecord());
+      unawaited(_readFeelings());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -560,6 +562,29 @@ class _DiaryPageState extends State<DiaryPage> {
       _post('表に自動で入れた：${autoFillSummary(applied)}。違っていたら「日々の記録」で直せる。');
     } catch (e) {
       debugPrint('記録の自動入力をできなかった: $e');
+    }
+  }
+
+  // 聴取の会話から、出来事ごとの感じ方の手がかりを読み取って残す。
+  //
+  // 利用者には何も聞かず、画面にも出さない（見せ方は別で作る）。残すのは、
+  // 根拠の発言が本当に依頼人の言葉にあるものだけ。失敗しても日記は保存済みなので、
+  // ログだけ残して諦める。
+  Future<void> _readFeelings() async {
+    try {
+      final talk = [
+        for (final line in _lines)
+          if (line.topic != null && (line.role == 'ai' || line.role == 'user'))
+            (role: line.role, text: line.text),
+      ];
+      final transcript = transcriptForExtraction(talk);
+      if (transcript.isEmpty) return;
+
+      final raw = await _gemini!.extractFeelingCues(text: transcript);
+      final cues = feelingCuesFromExtraction(raw, talk);
+      await _firestore.saveFeelingCues(_uid, _date, cues);
+    } catch (e) {
+      debugPrint('感じ方の手がかりを読み取れなかった: $e');
     }
   }
 

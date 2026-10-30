@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../core/auto_fill.dart' show kAutoFilledKey, kAutoRejectedKey;
+import '../core/feeling_cues.dart' show FeelingCue;
 import '../core/streak.dart';
 import '../models/analysis_entry.dart';
 import '../models/goal.dart';
@@ -200,6 +201,21 @@ class FirestoreService {
       kAutoFilledKey: FieldValue.arrayUnion(values.keys.toList()),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  // その日の感じ方の手がかりを保存する。日記を作り直すたびに読み取り直すので、
+  // その日の分は丸ごと置き換える（積み足さない）。手がかりが無いときは何も書かず、
+  // 前に読み取れた分を消さない。
+  Future<void> saveFeelingCues(
+    String uid,
+    String date,
+    List<FeelingCue> cues,
+  ) async {
+    if (cues.isEmpty) return;
+    await _user(uid).collection('feelings').doc(date).set({
+      'cues': [for (final cue in cues) cue.toMap()],
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
   }
 
   // 「自動で入れた」印を外す。利用者が値を直した項目は、利用者のものになる。
