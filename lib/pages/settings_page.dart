@@ -15,6 +15,7 @@ import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/settings_section.dart';
+import 'ai_data_notice_page.dart';
 import 'field_settings_page.dart';
 import 'role_select_page.dart';
 
@@ -489,6 +490,45 @@ class _SettingsPageState extends State<SettingsPage> {
                       onTap: _settings.notificationEnabled
                           ? _pickNotificationTime
                           : null,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 28),
+
+                // ── セクション: AIへの送信 ──────────────────────
+                // 日記と記録は個人的な内容なので、AI に渡ることと、その範囲を
+                // 設定からいつでも読めるようにする。一覧は別ページに置く。
+                const SectionHeader(
+                  title: '◆ AIへの送信について',
+                  subtitle: '入力した内容が、AIに渡る範囲',
+                ),
+                const SizedBox(height: 8),
+                SettingsCard(
+                  children: [
+                    ListTile(
+                      leading: Icon(Icons.shield_outlined, color: c.gold),
+                      title: Text(
+                        '何がAIに送られるか',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: c.textPrimary,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '記録・会話・日記が、質問や日記づくりのために送られます',
+                        style: TextStyle(fontSize: 12, color: c.textSecondary),
+                      ),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        color: c.textSecondary,
+                      ),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const AiDataNoticePage(),
+                        ),
+                      ),
                     ),
                   ],
                 ),
