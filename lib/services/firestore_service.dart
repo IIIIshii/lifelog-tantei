@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
+import '../core/auto_fill.dart' show kAutoFilledKey, kAutoRejectedKey;
 import '../core/streak.dart';
 import '../models/analysis_entry.dart';
 import '../models/goal.dart';
@@ -180,6 +181,41 @@ class FirestoreService {
           entry.key: entry.value ?? FieldValue.delete(),
       },
       'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // 聴取の会話から AI が読み取った値を、記録に書く。
+  //
+  // 値と「自動で入れた」印（autoFilled）を1回の書き込みで一緒に保存する。
+  // 別々に書くと、値だけ残って印が無い（＝利用者が入れた値に見える）状態ができうるため。
+  // 印は arrayUnion なので、すでにある印を消さない。
+  Future<void> saveAutoFilledValues(
+    String uid,
+    String date,
+    Map<String, Object> values,
+  ) async {
+    if (values.isEmpty) return;
+    await _records(uid).doc(date).set({
+      'values': values,
+      kAutoFilledKey: FieldValue.arrayUnion(values.keys.toList()),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // 「自動で入れた」印を外す。利用者が値を直した項目は、利用者のものになる。
+  //
+  // rejected が true のときは、利用者が自動入力を消した項目として、取り消しの記録
+  // （autoRejected）にも足す。日記を作り直したときに、AI が同じ値を入れ直さないため。
+  Future<void> clearAutoFilledMarks(
+    String uid,
+    String date,
+    List<String> ids, {
+    bool rejected = false,
+  }) async {
+    if (ids.isEmpty) return;
+    await _records(uid).doc(date).set({
+      kAutoFilledKey: FieldValue.arrayRemove(ids),
+      if (rejected) kAutoRejectedKey: FieldValue.arrayUnion(ids),
     }, SetOptions(merge: true));
   }
 

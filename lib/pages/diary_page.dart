@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import '../core/auto_fill.dart';
 import '../core/daily_record.dart';
 import '../core/goal_digest.dart';
 import '../core/scroll.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
+import '../models/record_field.dart';
 import '../models/goal.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
@@ -106,6 +110,8 @@ class _DiaryPageState extends State<DiaryPage> {
   String _diaryContext = '';
   // AI が候補を出せなかったときに、記録のテキスト項目から作る見出し
   List<String> _recordHints = const [];
+  // この日の表に並ぶ項目。聴取のあと、会話から値を読み取って埋める先になる
+  List<RecordField> _rows = const [];
   List<String> _recentDiaries = const [];
   // 追っている目標の直近の続き具合。質問が目標の実績を踏まえられるようにする。
   String _goalContext = '';
@@ -224,6 +230,7 @@ class _DiaryPageState extends State<DiaryPage> {
     _recordContext = recordSummary(rows, record);
     _diaryContext = recordSummary(rows, record, diaryOnly: true);
     _recordHints = topicHintsFromRecord(rows, record);
+    _rows = rows;
     await _loadGoalContext(goals);
   }
 
@@ -504,6 +511,8 @@ class _DiaryPageState extends State<DiaryPage> {
       _post(_role.text('diary_generated', '事件簿をまとめた。確認してくれ。'));
       setState(() => _lines.add(_Line(role: 'diary', text: text)));
       scrollToBottom(_scrollController);
+      // 日記の確認を待たせないよう、表の自動入力は裏で走らせる
+      unawaited(_autoFillRecord());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -513,6 +522,44 @@ class _DiaryPageState extends State<DiaryPage> {
       });
       _showError('日記をまとめられなかった: $e');
       await _openTopicSelect();
+    }
+  }
+
+  // 聴取の会話から、記録の表の空欄を自動で埋める。
+  //
+  // 同じ事実を聴取と表で2回入れさせないための補助。失敗しても日記は保存済みなので、
+  // 黙って諦める（ログだけ残す）。入れるのはまだ空の項目だけで、書き込む直前に記録を
+  // 読み直す。聴取の途中で表に書き足した値を、AI の読み取りで上書きしないため。
+  Future<void> _autoFillRecord() async {
+    try {
+      final transcript = transcriptForExtraction([
+        for (final line in _lines)
+          if (line.topic != null && (line.role == 'ai' || line.role == 'user'))
+            (role: line.role, text: line.text),
+      ]);
+      if (transcript.isEmpty || _rows.isEmpty) return;
+
+      final raw = await _gemini!.extractRecordValues(
+        text: transcript,
+        fields: _rows,
+      );
+      final record = await _firestore.getRecord(_uid, _date);
+      final applied = autoFillTargets(
+        proposalsFromExtraction(_rows, raw, {
+          for (final field in _rows) field.id: valueOf(record, field.id),
+        }),
+        // 利用者が「消す」で取り消した項目は、作り直しでも入れ直さない
+        rejected: autoRejectedIds(record),
+      );
+      if (applied.isEmpty) return;
+
+      await _firestore.saveAutoFilledValues(_uid, _date, {
+        for (final proposal in applied) proposal.field.id: proposal.value,
+      });
+      if (!mounted) return;
+      _post('表に自動で入れた：${autoFillSummary(applied)}。違っていたら「日々の記録」で直せる。');
+    } catch (e) {
+      debugPrint('記録の自動入力をできなかった: $e');
     }
   }
 
