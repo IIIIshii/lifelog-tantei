@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 日記・記録・設定・目標・分析など、このアプリのデータはすべて users/{uid} の下にある。
+    // ログインしている本人(request.auth.uid が uid と同じ)だけが読み書きできる。
+    // rules_version 2 では {document=**} が「0個以上の階層」に当たるので、
+    // users/{uid} 自身と、その下のサブコレクションの両方に効く。
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // 上に書いていない場所は、すべて拒否する。
+    // 何も書かなくても既定で拒否されるが、後から誤って開けないよう明示しておく。
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
