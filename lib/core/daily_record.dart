@@ -56,9 +56,23 @@ String? textOf(Map<String, dynamic>? record, String fieldId) {
   return value is String ? value.trim() : null;
 }
 
+/// 記録ドキュメントのうち、端末（Health Connect）から入れた項目の id を並べるキー。
+/// 印の扱いは core/health_daily.dart にまとめてある。
+const String kDeviceFilledKey = 'deviceFilled';
+
 /// その日に1つでも記録があるか。
-bool hasAnyValue(Map<String, dynamic>? record) =>
-    valuesOf(record)?.values.any(isFilled) ?? false;
+///
+/// 端末から入れただけの値は数えない。端末の値は表を開いたときに入るので、
+/// 過去の日を見返しただけで「記録した日」になり、連続記録日数が増えてしまうため。
+bool hasAnyValue(Map<String, dynamic>? record) {
+  final values = valuesOf(record);
+  if (values == null) return false;
+  final marks = record?[kDeviceFilledKey];
+  final fromDevice = marks is List ? marks.toSet() : const <Object?>{};
+  return values.entries.any(
+    (entry) => isFilled(entry.value) && !fromDevice.contains(entry.key),
+  );
+}
 
 // ──────────────────────────────────────────────────────────────
 // 入力値の正規化
@@ -146,6 +160,10 @@ List<RecordField> fieldsForDay(
 }
 
 /// 表の記入状況。ホームの「日々の記録 3/6」と、捜査の動線で記録を挟むかの判定に使う。
+///
+/// 端末から取る項目（RecordField.isHealth）は数えない。血圧や体温のように測らない日が
+/// 多い項目が入ると、いつまでも「未記入あり」になり、捜査のたびに表を先に開かされるため。
+/// 端末の項目は、利用者が書く欄というより、端末が書いてくれる欄として扱う。
 ({int filled, int total}) recordProgress(
   Iterable<RecordField> fields,
   Map<String, dynamic>? record,
@@ -153,6 +171,7 @@ List<RecordField> fieldsForDay(
   var filled = 0;
   var total = 0;
   for (final field in fields) {
+    if (field.isHealth) continue;
     total++;
     if (valueOf(record, field.id) != null) filled++;
   }
@@ -167,6 +186,7 @@ List<RecordField> fieldsForDay(
 ///
 /// diaryOnly を true にすると、日記の材料にしない項目（useInDiary: false）を外す。
 /// 話題の候補出しには全部を渡し、本文の生成には日記に使う項目だけを渡すため。
+/// AI に渡さない項目（shareWithAi: false）は、どちらでも外す（この要約は AI へ渡すもの）。
 String recordSummary(
   Iterable<RecordField> fields,
   Map<String, dynamic>? record, {
@@ -174,7 +194,8 @@ String recordSummary(
 }) {
   final lines = <String>[];
   for (final field in fields) {
-    if (diaryOnly && !field.useInDiary) continue;
+    if (!field.shareWithAi) continue;
+    if (diaryOnly && !field.usableInDiary) continue;
     final text = formatValue(field, valueOf(record, field.id));
     if (text == null) continue;
     lines.add('- ${field.promptLabel}: $text');
@@ -238,7 +259,7 @@ List<String> topicHintsFromRecord(
 }) {
   final hints = <String>[];
   for (final field in fields) {
-    if (field.kind != FieldKind.text || !field.useInDiary) continue;
+    if (field.kind != FieldKind.text || !field.usableInDiary) continue;
     final text = textOf(record, field.id);
     if (text == null) continue;
     final hint = text.length > maxLength

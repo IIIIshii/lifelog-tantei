@@ -6,6 +6,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../core/auto_fill.dart';
 import '../core/daily_record.dart';
 import '../core/goal_progress.dart';
+import '../core/health_daily.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
@@ -14,6 +15,7 @@ import '../models/record_field.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
+import '../services/health_service.dart';
 import '../widgets/section_label.dart';
 import 'field_settings_page.dart';
 import 'record_tell_sheet.dart';
@@ -26,6 +28,10 @@ import 'record_tell_sheet.dart';
 //
 // 1項目ずつ書く代わりに、「探偵に話す」（RecordTellSheet）でまとめて話し、
 // AI に表へ振り分けさせることもできる（確認してから入れる）。
+//
+// 端末（Health Connect）と連携していれば、開いたとき・日付を変えたときに
+// その日の歩数・睡眠などを読んで入れる（「端末から」と出す）。入れてよい欄の判断は
+// core/health_daily.dart の deviceFillTargets にあり、利用者が書いた値は上書きしない。
 //
 // 保存は項目ごとに即時（テキスト・数値は打ち終わりを少し待ってから）。
 // 「保存」ボタンを置かないのは、朝に睡眠だけ、夜に残りを書く、のように
@@ -71,6 +77,13 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
   // 聴取の会話から AI が自動で入れた項目の id。利用者が値を直す・消すと外れて、
   // 利用者の入力として扱う。
   final Set<String> _autoFilled = {};
+
+  // 端末（Health Connect）から入れた項目の id。扱いは _autoFilled と同じで、
+  // 利用者が値を直す・消すと外れる。
+  final Set<String> _deviceFilled = {};
+
+  // 利用者が「消す」で自動入力を取り消した項目の id。その日はもう自動で入れない。
+  final Set<String> _rejected = {};
 
   // まだ書き込んでいない変更（項目 id → 値。null は消す）
   final Map<String, Object?> _pending = {};
@@ -131,16 +144,18 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
       _autoFilled
         ..clear()
         ..addAll(autoFilledIds(record));
+      _deviceFilled
+        ..clear()
+        ..addAll(deviceFilledIds(record));
+      _rejected
+        ..clear()
+        ..addAll(autoRejectedIds(record));
       for (final field in rows) {
         final value = valueOf(record, field.id);
         _values[field.id] = value;
         if (field.kind == FieldKind.numeric || field.kind == FieldKind.text) {
           _controllers[field.id] = TextEditingController(
-            text: switch (value) {
-              num v => formatNumber(v.toDouble()),
-              String v => v,
-              _ => '',
-            },
+            text: _inputText(value),
           );
         }
       }
@@ -149,6 +164,8 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
         _goals = goals;
         _loading = false;
       });
+      // 端末の記録は表を出してから読む（読むのに時間がかかっても表を待たせない）
+      unawaited(_syncDevice(_day));
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -156,6 +173,50 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
         _failed = true;
       });
     }
+  }
+
+  // 入力欄に出す文字。数値は 8000.0 ではなく 8000 と出す。
+  String _inputText(Object? value) => switch (value) {
+    num v => formatNumber(v.toDouble()),
+    String v => v,
+    _ => '',
+  };
+
+  // 端末（Health Connect）からその日の値を読み、入れてよい欄に入れる。
+  //
+  // 入れてよいかは、読み終えた時点の画面の状態と比べて決める。読んでいる間に
+  // 利用者が書いた値は、印が外れて「利用者の入力」になっているので上書きされない。
+  // 連携していない端末・読めなかったときは何もしない（表は手で書ける）。
+  Future<void> _syncDevice(DateTime day) async {
+    final metrics = healthMetricsFor(_rows);
+    if (metrics.isEmpty) return;
+    final readings = await HealthService.instance.readDay(day, metrics);
+    final date = dateKey(day);
+    if (!mounted || readings.isEmpty || date != _dateKey) return;
+    final targets = deviceFillTargets(
+      fields: _rows,
+      readings: readings,
+      record: {
+        'values': Map<String, dynamic>.of(_values),
+        kAutoFilledKey: _autoFilled.toList(),
+        kDeviceFilledKey: _deviceFilled.toList(),
+        kAutoRejectedKey: _rejected.toList(),
+      },
+    );
+    if (targets.isEmpty) return;
+    setState(() {
+      for (final entry in targets.entries) {
+        _values[entry.key] = entry.value;
+        _controllers[entry.key]?.text = _inputText(entry.value);
+      }
+      _deviceFilled.addAll(targets.keys);
+      _autoFilled.removeAll(targets.keys);
+    });
+    _firestore.saveDeviceValues(widget.uid, date, targets).catchError((
+      Object e,
+    ) {
+      debugPrint('端末の値を保存できなかった: $e');
+    });
   }
 
   // 日付を動かす。未来の日は記録しない（まだ起きていない事実を書く場所ではないため）。
@@ -172,10 +233,13 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
   void _set(RecordField field, Object? raw, {bool immediate = false}) {
     final value = normalizeInput(field, raw);
     // 利用者が触った項目は、自動で入れたものではなく利用者の入力になる
-    final wasAuto = _autoFilled.contains(field.id);
+    final wasAuto =
+        _autoFilled.contains(field.id) || _deviceFilled.contains(field.id);
     setState(() {
       _values[field.id] = value;
       _autoFilled.remove(field.id);
+      _deviceFilled.remove(field.id);
+      if (wasAuto && value == null) _rejected.add(field.id);
     });
     // 空に戻した（＝自動入力を取り消した）なら、その日はもう自動で埋めない
     if (wasAuto) _clearAutoMarks([field.id], rejected: value == null);
@@ -241,9 +305,12 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
     if (accepted == null || accepted.isEmpty || !mounted) return;
 
     // 確認して入れた値は利用者の入力。自動で入れた印が付いていた項目は外す
-    final overwrittenAuto = accepted.keys.where(_autoFilled.contains).toList();
+    final overwrittenAuto = accepted.keys
+        .where((id) => _autoFilled.contains(id) || _deviceFilled.contains(id))
+        .toList();
     setState(() {
       _autoFilled.removeAll(accepted.keys);
+      _deviceFilled.removeAll(accepted.keys);
       for (final entry in accepted.entries) {
         _values[entry.key] = entry.value;
         _pending[entry.key] = entry.value;
@@ -283,8 +350,9 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
     final c = context.colors;
     final progress = recordProgress(_rows, {'values': _values});
 
-    // 生活の記録と目標の項目を分けて見せる（目標ごとに見出しを付ける）
-    final lifeRows = _rows.where((f) => !f.isGoal).toList();
+    // 生活の記録・端末の記録・目標の項目を分けて見せる（目標ごとに見出しを付ける）
+    final lifeRows = _rows.where((f) => !f.isGoal && !f.isHealth).toList();
+    final healthRows = _rows.where((f) => f.isHealth).toList();
     final goalRows = <String, List<RecordField>>{};
     for (final field in _rows.where((f) => f.isGoal)) {
       (goalRows[field.goalId!] ??= []).add(field);
@@ -377,6 +445,15 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
                             const SizedBox(height: 10),
                             for (final field in lifeRows) _buildRow(field),
                           ],
+                          if (healthRows.isNotEmpty) ...[
+                            const SizedBox(height: 18),
+                            const SectionLabel(
+                              '端末の記録',
+                              icon: Icons.watch_outlined,
+                            ),
+                            const SizedBox(height: 10),
+                            for (final field in healthRows) _buildRow(field),
+                          ],
                           for (final entry in goalRows.entries) ...[
                             const SizedBox(height: 18),
                             SectionLabel(
@@ -441,10 +518,11 @@ class _RecordSheetPageState extends State<RecordSheetPage> {
                     ),
                   ),
                 ),
-                // 聴取の会話から AI が入れた値。違っていたら、ここで消せる
-                if (_autoFilled.contains(field.id)) ...[
+                // AI が会話から入れた値・端末から入れた値。違っていたら、ここで消せる
+                if (_autoFilled.contains(field.id) ||
+                    _deviceFilled.contains(field.id)) ...[
                   Text(
-                    'AIが入力',
+                    _deviceFilled.contains(field.id) ? '端末から' : 'AIが入力',
                     style: TextStyle(fontSize: 11, color: c.textSecondary),
                   ),
                   TextButton(

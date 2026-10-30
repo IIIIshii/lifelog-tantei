@@ -110,6 +110,8 @@ PeriodSummary summarizePeriod(
 
   final lines = <String>[];
   for (final field in fields.values) {
+    // 集計は AI へ渡す文面になるので、AI に渡さない項目は数えない
+    if (!field.shareWithAi) continue;
     final line = _fieldLine(field, inPeriod, periodDays);
     if (line != null) lines.add(line);
   }

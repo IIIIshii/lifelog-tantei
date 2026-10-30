@@ -6,6 +6,7 @@ import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/record_field.dart';
 import '../services/firestore_service.dart';
+import 'health_connect_page.dart';
 
 // 日々の記録に並べる項目（記録の型）の設定画面。
 //
@@ -15,6 +16,7 @@ import '../services/firestore_service.dart';
 //
 // プリセットは消せず、使う／使わないを切り替えるだけ。足した項目は消せるが、
 // 消すと過去の記録がその項目の値として読めなくなるので、先に「使わない」を勧める。
+// 端末（Health Connect）の項目は、ここから開く連携の画面（HealthConnectPage）で足す。
 class FieldSettingsPage extends StatefulWidget {
   final String uid;
 
@@ -103,6 +105,18 @@ class _FieldSettingsPageState extends State<FieldSettingsPage> {
     }
   }
 
+  Future<void> _openHealthConnect() async {
+    final added = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => HealthConnectPage(uid: widget.uid, fields: _fields),
+      ),
+    );
+    if (added != true || !mounted) return;
+    await _load();
+    _showSnack('端末の記録を表に加えた。表を開くと値が入る。');
+  }
+
   Future<void> _add() async {
     final result = await showModalBottomSheet<_EditResult>(
       context: context,
@@ -162,14 +176,33 @@ class _FieldSettingsPageState extends State<FieldSettingsPage> {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               header: Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  '長押しで並べ替え。タップで曜日や名前を変えられる。\n'
-                  '追跡中の事件の項目は相談室で決める（ここには出ない）。',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: c.textSecondary,
-                    height: 1.5,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      '長押しで並べ替え。タップで曜日や名前を変えられる。\n'
+                      '追跡中の事件の項目は相談室で決める（ここには出ない）。',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: c.textSecondary,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // スマートウォッチの歩数・睡眠などを表に入れる入口
+                    OutlinedButton.icon(
+                      onPressed: _openHealthConnect,
+                      icon: Icon(Icons.watch_outlined, color: c.gold),
+                      label: Text(
+                        '端末（ウォッチ）と連携する',
+                        style: TextStyle(color: c.gold),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: c.gold),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               footer: Padding(
@@ -223,8 +256,9 @@ class _FieldTile extends StatelessWidget {
       fieldKindLabel(field.kind),
       if (field.kind == FieldKind.numeric && field.unit.isNotEmpty) field.unit,
       describeWeekdays(field.weekdays),
-      if (!field.useInDiary) '日記に使わない',
+      if (!field.shareWithAi) 'AIに送らない' else if (!field.useInDiary) '日記に使わない',
       if (field.source == FieldSource.consult) '相談室で追加',
+      if (field.isHealth) '端末から',
     ];
     return Material(
       color: c.cardBg,
@@ -301,6 +335,7 @@ class _FieldEditorSheetState extends State<_FieldEditorSheet> {
   late FieldKind _kind;
   late List<int> _weekdays;
   late bool _useInDiary;
+  late bool _shareWithAi;
   String? _error;
 
   bool get _isNew => widget.initial == null;
@@ -315,6 +350,7 @@ class _FieldEditorSheetState extends State<_FieldEditorSheet> {
     _kind = initial?.kind ?? FieldKind.text;
     _weekdays = initial?.weekdays ?? RecordField.allWeekdays;
     _useInDiary = initial?.useInDiary ?? true;
+    _shareWithAi = initial?.shareWithAi ?? true;
   }
 
   @override
@@ -360,14 +396,17 @@ class _FieldEditorSheetState extends State<_FieldEditorSheet> {
             weekdays: _weekdays,
             source: FieldSource.self,
             useInDiary: _useInDiary,
+            shareWithAi: _shareWithAi,
           )
         : initial.copyWith(
             // プリセットの名前は変えさせない（分析室の見出しと食い違うため）
             label: initial.isCustom ? label : null,
-            unit: unit,
+            // 端末の項目の単位は変えさせない（端末が入れる値の単位は決まっているため）
+            unit: initial.isHealth ? null : unit,
             choices: choices,
             weekdays: _weekdays,
             useInDiary: _useInDiary,
+            shareWithAi: _shareWithAi,
           );
     Navigator.pop(context, _EditResult.save(field));
   }
@@ -403,6 +442,8 @@ class _FieldEditorSheetState extends State<_FieldEditorSheet> {
     final c = context.colors;
     final initial = widget.initial;
     final canRename = initial == null || initial.isCustom;
+    // 端末の項目は、消しても連携の画面から足し直せる
+    final canDelete = initial != null && (initial.isCustom || initial.isHealth);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -463,6 +504,7 @@ class _FieldEditorSheetState extends State<_FieldEditorSheet> {
                 _Caption('単位'),
                 TextField(
                   controller: _unit,
+                  enabled: initial == null || !initial.isHealth,
                   style: TextStyle(color: c.textPrimary),
                   decoration: _decoration(c, hint: '例：kg・歩・分'),
                 ),
@@ -487,15 +529,35 @@ class _FieldEditorSheetState extends State<_FieldEditorSheet> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text(
+                  'AIに送る',
+                  style: TextStyle(fontSize: 14, color: c.textPrimary),
+                ),
+                subtitle: Text(
+                  'オフにすると記録には残るが、日記・話題の候補・所見のどれにも渡さない',
+                  style: TextStyle(fontSize: 11, color: c.textSecondary),
+                ),
+                value: _shareWithAi,
+                onChanged: (v) => setState(() => _shareWithAi = v),
+                activeThumbColor: c.onAccent,
+                activeTrackColor: c.gold,
+              ),
+              // AI に送らない項目は日記にも使わないので、そのあいだは選ばせない
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
                   '日記の材料にする',
                   style: TextStyle(fontSize: 14, color: c.textPrimary),
                 ),
                 subtitle: Text(
-                  'オフにすると記録には残るが、探偵は日記の本文に書かない',
+                  _shareWithAi
+                      ? 'オフにすると記録には残るが、探偵は日記の本文に書かない'
+                      : '「AIに送る」がオフのあいだは、日記にも使わない',
                   style: TextStyle(fontSize: 11, color: c.textSecondary),
                 ),
-                value: _useInDiary,
-                onChanged: (v) => setState(() => _useInDiary = v),
+                value: _shareWithAi && _useInDiary,
+                onChanged: _shareWithAi
+                    ? (v) => setState(() => _useInDiary = v)
+                    : null,
                 activeThumbColor: c.onAccent,
                 activeTrackColor: c.gold,
               ),
@@ -513,7 +575,7 @@ class _FieldEditorSheetState extends State<_FieldEditorSheet> {
               const SizedBox(height: 12),
               Row(
                 children: [
-                  if (initial != null && initial.isCustom)
+                  if (canDelete)
                     TextButton(
                       onPressed: _confirmDelete,
                       child: Text(

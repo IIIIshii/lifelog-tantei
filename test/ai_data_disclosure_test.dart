@@ -35,12 +35,17 @@ void main() {
       final mbti = aiDataItems.firstWhere((e) => e.label.contains('MBTI'));
       expect(mbti.note, isNotEmpty);
     });
+
+    test('端末の健康の記録は、最初から送らない種類があることを注記している', () {
+      final health = aiDataItems.firstWhere((e) => e.label.contains('健康'));
+      expect(health.note, contains('「AIに送る」がオフ'));
+    });
   });
 
   group('AiDataNoticePage', () {
     Future<void> pumpPage(WidgetTester tester) async {
-      // 6項目が1画面に収まる縦長にする（ListView は画面外を描画しないため）
-      tester.view.physicalSize = const Size(800, 2400);
+      // 7項目が1画面に収まる縦長にする（ListView は画面外を描画しないため）
+      tester.view.physicalSize = const Size(800, 2800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
