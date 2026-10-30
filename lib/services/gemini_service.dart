@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import '../core/daily_record.dart';
+import '../core/feeling_cues.dart';
 import '../models/goal.dart';
 import '../models/record_field.dart';
 import '../models/self_analysis.dart';
@@ -245,6 +246,50 @@ class GeminiService {
       // 読み取れない応答は「提案なし」として扱う
     }
     return const {};
+  }
+
+  // 聴取の会話から、出来事ごとの感じ方の手がかりを読み取らせる。
+  //
+  // 戻り値は生の JSON 配列。根拠が本当に依頼人の発言にあるかなどの検証は、
+  // 呼び出し側が feelingCuesFromExtraction で行う。読み取れない応答は空の配列にする
+  // （手がかりが残らないだけで、日記には影響しない）。人格は使わない。
+  Future<List<dynamic>> extractFeelingCues({required String text}) async {
+    if (text.trim().isEmpty) return const [];
+    final model = GenerativeModel(
+      model: 'gemini-2.5-flash',
+      apiKey: _apiKey,
+      systemInstruction: Content.system(AiInstructions.feelingReader()),
+      generationConfig: GenerationConfig(
+        responseMimeType: 'application/json',
+        responseSchema: Schema.array(
+          items: Schema.object(
+            properties: {
+              'activity': Schema.string(description: '出来事の短い名前'),
+              'feeling': Schema.enumString(
+                enumValues: [for (final f in Feeling.values) f.key],
+              ),
+              'quote': Schema.string(description: '根拠にした依頼人の発言の抜き出し'),
+            },
+            requiredProperties: ['activity', 'feeling', 'quote'],
+          ),
+        ),
+      ),
+    );
+    final response = await model.generateContent([
+      Content.text(
+        DiaryPrompts.buildFeelingPrompt(
+          feelings: [for (final f in Feeling.values) (f.key, f.label)],
+          text: text,
+        ),
+      ),
+    ]);
+    try {
+      final decoded = jsonDecode(response.text?.trim() ?? '');
+      if (decoded is List) return decoded;
+    } catch (_) {
+      // 読み取れない応答は「手がかりなし」として扱う
+    }
+    return const [];
   }
 
   // 項目1つぶんの、返させる値の形

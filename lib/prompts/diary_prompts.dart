@@ -106,6 +106,23 @@ class DiaryPrompts {
     return buffer.toString();
   }
 
+  // 会話から感じ方の手がかりを読み取らせるプロンプトを組み立てる。
+  // feelings: 返してよい感じ方の（キー, 説明）。キーはここで示したものに限る。
+  static String buildFeelingPrompt({
+    required List<(String, String)> feelings,
+    required String text,
+  }) {
+    final buffer = StringBuffer()..writeln('【返してよい感じ方（feeling）】');
+    for (final (key, label) in feelings) {
+      buffer.writeln('- $key: $label');
+    }
+    buffer
+      ..writeln()
+      ..writeln('【会話】')
+      ..write(text.trim());
+    return buffer.toString();
+  }
+
   // 直近期間の事件簿群を解析するプロンプトを組み立てる。
   // days は mergeDays の結果（(YYYY-MM-DD, {values, diary})）。日付順は問わない。
   // fields: 値のキー → 記録項目（fieldIndex の結果）。ここに無いキーの値は渡さない。
