@@ -322,7 +322,7 @@ users/{uid}/
 - Gemini APIキー
 - (Googleログインを使う場合)Firebaseの**WebクライアントID**
 
-> **Firestoreのセキュリティルールは、このリポジトリに含まれていません。** 自分のFirebaseプロジェクトで、`users/{uid}` 配下を本人だけが読み書きできるルールを設定してください。
+> **Firestoreのセキュリティルールは `firestore.rules` にあります。** `users/{uid}` 配下を、ログインした本人だけが読み書きできます。自分のFirebaseプロジェクトに反映するには、`firebase deploy --only firestore:rules` を実行するか、Firebaseコンソールの「Firestore → ルール」に内容を貼り付けて公開してください。
 
 ### 手順
 
@@ -434,7 +434,6 @@ await ThemeController.instance.load();       // 5. 保存したテーマを同�
 - 端末のタイムゾーン名が、`timezone` パッケージに存在しない値(例: `GMT`)だと、起動時に例外で止まる
 - 目標を見直した直後、分析室の表示が、アプリを再起動するまで古い目標の内容のままになることがある
 - 音声入力と通知は、エミュレーターでは確認できていない(実機で確認する)
-- Firestoreのセキュリティルールが、リポジトリに含まれていない(issue #187)
 
 ---
 
