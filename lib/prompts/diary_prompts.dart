@@ -29,9 +29,13 @@ class DiaryPrompts {
         '二つの内容を自然に統合し、捜査ログとして再記録してください。';
   }
 
+  // 記録は「全部入れる材料」ではなく「出来事の話に関係するときだけ使う材料」として渡す。
+  // 全部入れさせると、睡眠時間のような数字が話の流れと無関係に付き、
+  // 日記が記録表の読み上げになる。
   static String _recordBlock(String recordContext) => recordContext.isEmpty
       ? ''
-      : '\n\n【日々の記録（日記に自然に織り込むこと）】\n$recordContext';
+      : '\n\n【日々の記録（出来事の話に関係する数字だけ自然に使い、関係しないものは書かない）】\n'
+          '$recordContext';
 
   // 話題の候補出しプロンプト。
   //
