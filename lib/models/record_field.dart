@@ -55,6 +55,7 @@ enum FieldSource {
   preset, // 最初から用意されている項目（睡眠時間など）
   self, // 設定画面で自分で足した
   consult, // 相談室で探偵の提案を採用した
+  health, // 端末（Health Connect）と連携して足した
 }
 
 // 保存文字列 → enum。記録の無いもの・読めない値は null。
@@ -65,6 +66,7 @@ FieldSource? fieldSourceFrom(String? raw) => switch (raw) {
   'preset' => FieldSource.preset,
   'self' => FieldSource.self,
   'consult' => FieldSource.consult,
+  'health' => FieldSource.health,
   _ => null,
 };
 
@@ -72,11 +74,17 @@ String fieldSourceTo(FieldSource source) => switch (source) {
   FieldSource.preset => 'preset',
   FieldSource.self => 'self',
   FieldSource.consult => 'consult',
+  FieldSource.health => 'health',
 };
 
 /// カスタム項目の id につく接頭辞。目標の項目（'goal_'）と同じ役割で、
 /// 値のキーを見ただけで出所が分かるようにする。
 const String kCustomFieldPrefix = 'custom_';
+
+/// 端末から読む項目の id につく接頭辞（`health_steps` など）。
+/// uuid ではなく固定の名前にするのは、同じ種類（歩数など）を何度連携し直しても
+/// 同じ項目に値が入ってほしいため。どの種類かは core/health_daily.dart の一覧で決まる。
+const String kHealthFieldPrefix = 'health_';
 
 // ── 最初から用意されている項目の id ───────────────────────────
 // 分析室のサマリー（平均睡眠・気分の分布など）がこの id で値を引く。
@@ -122,6 +130,12 @@ class RecordField {
   /// 体重のように、事実としては残したいが本文には出したくない項目があるため。
   final bool useInDiary;
 
+  /// AI に値を渡すか。オフの項目は、日記・話題の候補・所見・今日のコメントの
+  /// どれにも値を渡さない（記録と表示には残る）。
+  /// 血圧・血糖・月経のように、記録はしたいが外へは出したくない項目があるため。
+  /// useInDiary より強く、オフなら日記にも使わない。
+  final bool shareWithAi;
+
   /// 今使っているか。使わなくなった項目は消さずにここを false にする。
   /// 消すと、過去の値が「何を記録したものか」分からなくなるため
   /// （以前、消したカスタム質問の回答を分析室が読めなくなっていた）。
@@ -141,6 +155,7 @@ class RecordField {
     this.weekdays = allWeekdays,
     this.source,
     this.useInDiary = true,
+    this.shareWithAi = true,
     this.active = true,
     this.goalId,
     this.goalTitle,
@@ -190,6 +205,7 @@ class RecordField {
           : rawWeekdays,
       source: fieldSourceFrom(map['source'] as String?),
       useInDiary: map['useInDiary'] as bool? ?? true,
+      shareWithAi: map['shareWithAi'] as bool? ?? true,
       active: map['active'] as bool? ?? true,
     );
   }
@@ -207,6 +223,7 @@ class RecordField {
     'weekdays': weekdays,
     if (source != null) 'source': fieldSourceTo(source!),
     'useInDiary': useInDiary,
+    'shareWithAi': shareWithAi,
     'active': active,
   };
 
@@ -217,6 +234,7 @@ class RecordField {
     List<String>? choices,
     List<int>? weekdays,
     bool? useInDiary,
+    bool? shareWithAi,
     bool? active,
   }) {
     return RecordField(
@@ -229,6 +247,7 @@ class RecordField {
       weekdays: weekdays ?? this.weekdays,
       source: source,
       useInDiary: useInDiary ?? this.useInDiary,
+      shareWithAi: shareWithAi ?? this.shareWithAi,
       active: active ?? this.active,
       goalId: goalId,
       goalTitle: goalTitle,
@@ -240,6 +259,13 @@ class RecordField {
   /// 後から足した項目か（設定画面で足したもの・相談室で採用したもの）。
   /// 設定画面で「削除」を出してよいかの判定に使う（プリセットは消さず切り替えるだけ）。
   bool get isCustom => id.startsWith(kCustomFieldPrefix);
+
+  /// 端末と連携して足した項目か。値は端末から入り、手でも直せる。
+  /// 記入状況（「記入 3/6」）の数には入れない（daily_record.dart の recordProgress を参照）。
+  bool get isHealth => id.startsWith(kHealthFieldPrefix);
+
+  /// 日記の本文に使ってよいか。AI に渡さない項目は、日記にも使わない。
+  bool get usableInDiary => shareWithAi && useInDiary;
 
   /// AI へ渡すときのラベル。目標の項目は目標名を添える。
   /// 別々の目標に同じ「体重」があると、項目名だけではどちらの記録か区別が付かないため。

@@ -220,6 +220,8 @@ class DiaryPrompts {
   ) {
     final pairs = <String>[];
     for (final field in fields.values) {
+      // AI に渡さない項目（血圧・血糖など）は、所見の材料にもしない
+      if (!field.shareWithAi) continue;
       final text = formatValue(field, valueOf(day, field.id));
       if (text == null) continue;
       pairs.add('${field.promptLabel}:$text');

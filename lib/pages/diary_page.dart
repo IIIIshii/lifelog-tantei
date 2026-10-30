@@ -7,6 +7,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../core/auto_fill.dart';
 import '../core/daily_record.dart';
 import '../core/goal_digest.dart';
+import '../core/health_daily.dart';
 import '../core/scroll.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
@@ -16,6 +17,7 @@ import '../models/goal.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
+import '../services/health_service.dart';
 import '../widgets/choice_buttons.dart';
 import '../widgets/diary_card.dart';
 import '../widgets/input_area.dart';
@@ -224,14 +226,40 @@ class _DiaryPageState extends State<DiaryPage> {
     final recordFuture = _firestore.getRecord(_uid, _date);
     final fields = await fieldsFuture;
     final goals = await goalsFuture;
-    final record = await recordFuture;
     final day = DateTime.tryParse(_date) ?? DateTime.now();
     final rows = fieldsForDay(fields, goals, day);
+    final record = await _withDeviceValues(rows, await recordFuture, day);
     _recordContext = recordSummary(rows, record);
     _diaryContext = recordSummary(rows, record, diaryOnly: true);
     _recordHints = topicHintsFromRecord(rows, record);
     _rows = rows;
     await _loadGoalContext(goals);
+  }
+
+  // 端末（Health Connect）の記録を読んで表の空いている欄などに入れ、入れたあとの記録を返す。
+  //
+  // 表を開かずに聴取へ進んでも、今日の歩数や睡眠が話題と日記の材料に入るようにするため。
+  // 入れてよい欄の判断は表と同じ（deviceFillTargets）。読めなくても聴取は止めない。
+  Future<Map<String, dynamic>?> _withDeviceValues(
+    List<RecordField> rows,
+    Map<String, dynamic>? record,
+    DateTime day,
+  ) async {
+    final metrics = healthMetricsFor(rows);
+    if (metrics.isEmpty) return record;
+    final readings = await HealthService.instance.readDay(day, metrics);
+    final targets = deviceFillTargets(
+      fields: rows,
+      readings: readings,
+      record: record,
+    );
+    if (targets.isEmpty) return record;
+    unawaited(
+      _firestore.saveDeviceValues(_uid, _date, targets).catchError((Object e) {
+        debugPrint('端末の値を保存できなかった: $e');
+      }),
+    );
+    return withDeviceValues(record, targets);
   }
 
   // 目標の続き具合を読む。質問の補助でしかないので、失敗しても聴取は止めない。

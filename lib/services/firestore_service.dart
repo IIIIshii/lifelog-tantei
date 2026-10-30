@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import '../core/auto_fill.dart' show kAutoFilledKey, kAutoRejectedKey;
+import '../core/daily_record.dart' show kDeviceFilledKey;
+import '../core/health_daily.dart' show HealthMetric;
 import '../core/streak.dart';
 import '../models/analysis_entry.dart';
 import '../models/goal.dart';
@@ -158,6 +160,37 @@ class FirestoreService {
     });
   }
 
+  // 端末と連携して見つかった項目を、記録の型に足す。
+  //
+  // 同じ id の項目が既にあれば、足さずに「使う」に切り替える。睡眠時間・運動したは
+  // プリセットとして元からあり、端末の項目も一度消してから連携し直すことがあるため。
+  // addField と同じく、読み直してから書く（相談室・設定画面の書き込みを消さない）。
+  Future<void> addHealthFields(String uid, List<HealthMetric> metrics) async {
+    if (metrics.isEmpty) return;
+    final ref = _fieldsDoc(uid);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      final raw = snap.data()?['items'];
+      final current = raw is List
+          ? [
+              for (final item in raw)
+                if (item is Map)
+                  RecordField.fromMap(Map<String, dynamic>.from(item)),
+            ]
+          : [...kPresetFields];
+      final ids = {for (final metric in metrics) metric.fieldId};
+      final existing = {for (final field in current) field.id};
+      tx.set(ref, {
+        'items': [
+          for (final field in current)
+            ids.contains(field.id) ? field.copyWith(active: true) : field,
+          for (final metric in metrics)
+            if (!existing.contains(metric.fieldId)) metric.toField(),
+        ].map((f) => f.toMap()).toList(),
+      });
+    });
+  }
+
   // ──────────────────────────────────────────────────────────────
   // 日々の記録（records/{YYYY-MM-DD}）
   // ──────────────────────────────────────────────────────────────
@@ -202,10 +235,31 @@ class FirestoreService {
     }, SetOptions(merge: true));
   }
 
-  // 「自動で入れた」印を外す。利用者が値を直した項目は、利用者のものになる。
+  // 端末（Health Connect）から読んだ値を、記録に書く。
+  //
+  // 値・「端末から入れた」印（deviceFilled）の付与・AI の印の除去を1回の書き込みにする
+  // （core/health_daily.dart の withDeviceValues と同じ形）。AI が会話から入れた値を
+  // 端末の値で置き換えたとき、AI の印だけが残ると「AIが入力」と出てしまうため。
+  Future<void> saveDeviceValues(
+    String uid,
+    String date,
+    Map<String, Object> values,
+  ) async {
+    if (values.isEmpty) return;
+    final ids = values.keys.toList();
+    await _records(uid).doc(date).set({
+      'values': values,
+      kDeviceFilledKey: FieldValue.arrayUnion(ids),
+      kAutoFilledKey: FieldValue.arrayRemove(ids),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // 「自動で入れた」印（AI・端末の両方）を外す。利用者が値を直した項目は、利用者のものになる。
   //
   // rejected が true のときは、利用者が自動入力を消した項目として、取り消しの記録
-  // （autoRejected）にも足す。日記を作り直したときに、AI が同じ値を入れ直さないため。
+  // （autoRejected）にも足す。日記を作り直したり表を開き直したりしたときに、
+  // AI や端末が同じ値を入れ直さないため。
   Future<void> clearAutoFilledMarks(
     String uid,
     String date,
@@ -215,6 +269,7 @@ class FirestoreService {
     if (ids.isEmpty) return;
     await _records(uid).doc(date).set({
       kAutoFilledKey: FieldValue.arrayRemove(ids),
+      kDeviceFilledKey: FieldValue.arrayRemove(ids),
       if (rejected) kAutoRejectedKey: FieldValue.arrayUnion(ids),
     }, SetOptions(merge: true));
   }

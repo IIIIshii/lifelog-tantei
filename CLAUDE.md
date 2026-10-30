@@ -48,7 +48,7 @@ flutter test test/widget_test.dart
 - `lib/core/` — UI から独立した純関数（`daily_record` / `goal_progress` / `chart_scale` /
   `streak` / `numeric_answer` / `question_schedule` / `scroll`）とテーマ。
   Firestore を使わずテストできる形に保つ
-- `lib/services/` — auth / firestore / gemini / notification / speech のシングルトン
+- `lib/services/` — auth / firestore / gemini / health / notification / speech のシングルトン
 - `lib/models/`, `lib/roles/`, `lib/prompts/`, `lib/widgets/`
 
 **日々の記録と聴取の分離:** 事実（睡眠時間・気分・何をしたか・カスタム項目・目標の行動項目）は
@@ -59,6 +59,13 @@ flutter test test/widget_test.dart
 表は「探偵に話す」（RecordTellSheet）でまとめて話して埋めることもできる。AI が項目へ振り分けた
 結果は下書きとして確認してから入れ、既に値がある項目は勝手に上書きしない。
 一問一答の対話入力は未実装（Role の q_* はそのための文面）。
+
+**端末（Health Connect）からの取得:** スマートウォッチのアプリが Health Connect に書いた
+歩数・睡眠・心拍などを、表を開いたとき・聴取を始めるときに読んで表に入れる（Android のみ・前面のみ）。
+項目は「記録する項目」→「端末と連携する」（HealthConnectPage）で、直近30日に記録があった種類だけを足す。
+取る種類と1日分のまとめ方は `core/health_daily.dart` の `kHealthMetrics`。入れてよい欄の判断
+（`deviceFillTargets`）は、空欄・端末が前に入れた欄・AI が会話から入れた欄だけで、利用者の値は上書きしない。
+端末の項目は記入状況（「記入 3/6」）に数えず、端末の値だけの日は「記録した日」にも数えない。
 
 **Initialization order in `main()`:**
 1. `WidgetsFlutterBinding.ensureInitialized()` — must come first (required before any MethodChannel/platform call)
@@ -73,7 +80,7 @@ flutter test test/widget_test.dart
 その日の事実はすべて `records/{date}` の `values` に「項目 id → 値」で入り、
 値は Firestore の型のまま（数値は num、はい／いいえは bool、選択肢・テキストは String）。
 項目 id はプリセットが `sleep` / `mood` など、カスタムが `custom_<uuid>`、
-目標の行動項目が `goal_<actionId>`。
+目標の行動項目が `goal_<actionId>`、端末の項目が `health_<種類>`（`health_steps` など固定の名前）。
 
 記録の型の置き場所は2つ: 生活の記録・カスタム項目は `settings/fields`、
 目標の行動項目は `goals/{goalId}.actions`（目標を閉じれば表から外れる）。
@@ -85,9 +92,12 @@ users/{uid}/
 ├ settings/preferences                  ← UserSettings（担当探偵・通知）
 ├ settings/fields                       ← 記録の型 items[]（RecordField）
 │   id / label / kind(numeric|yesNo|choice|text) / unit / target / choices /
-│   weekdays / source(preset|self|consult) / useInDiary / active
+│   weekdays / source(preset|self|consult|health) / useInDiary / shareWithAi / active
+│   （shareWithAi: false の項目は、日記・話題の候補・所見・期間の集計のどれにも値を渡さない）
 ├ records/{YYYY-MM-DD}                  ← 日々の記録
 │   values{項目id: 値} / updatedAt
+│   autoFilled[]（AI が会話から入れた項目）/ deviceFilled[]（端末から入れた項目）/
+│   autoRejected[]（利用者が「消す」で取り消した項目。その日はもう自動で入れない）
 ├ diaries/{YYYY-MM-DD}                  ← 日記（1日1件）
 │   text / topics[]（聴取で話した出来事）/ role / mode('interview'|'manual') / updatedAt
 │   └ interview/{autoId}  role / text / order / topic / timestamp
