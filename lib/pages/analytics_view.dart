@@ -159,7 +159,12 @@ class _AnalyticsViewState extends State<AnalyticsView>
     }
     setState(() => _isGeneratingAnalysis = true);
     try {
-      final text = await gemini.generateAnalysis(days, fields: _fieldIndex);
+      final text = await gemini.generateAnalysis(
+        days,
+        fields: _fieldIndex,
+        today: DateTime.now(),
+        periodDays: _days,
+      );
       await _firestore.addAnalysis(
         widget.uid,
         AnalysisEntry(
