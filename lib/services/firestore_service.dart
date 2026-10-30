@@ -465,16 +465,20 @@ class FirestoreService {
   // 消さないのは、行動項目の定義（ラベル・単位）が目標の側にしか無いため。
   // 消すと records に残った 'goal_<id>' の値が何の記録だったのか読めなくなる。
   // closedAt は 'YYYY-MM-DD'（呼び出し側が dateKey で渡す）。
+  // closeReason は終えた理由。空なら書かない（理由を書かずに閉じた場合に、
+  // 空文字で上書きして以前のものを消さないため）。
   Future<void> closeGoal(
     String uid,
     Goal goal,
     GoalStatus status, {
     required String closedAt,
+    String closeReason = '',
   }) async {
     if (goal.isEmpty || goal.id.isEmpty) return;
     await _goals(uid).doc(goal.id).set({
       'status': goalStatusTo(status),
       'closedAt': closedAt,
+      if (closeReason.trim().isNotEmpty) 'closeReason': closeReason.trim(),
     }, SetOptions(merge: true));
   }
 

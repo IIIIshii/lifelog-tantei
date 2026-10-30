@@ -140,8 +140,8 @@ String goalContinuityDigest(
 
 /// 追跡を終えた目標の結末。新しく終えたものから最大 [limit] 件。無ければ空文字。
 ///
-/// 終え方（解決・断念）と、着手日〜終了日だけを渡す。理由はまだ記録されていないので、
-/// 「なぜやめたか」は推測させない文面にしている。
+/// 終え方（解決・断念）と、着手日〜終了日を渡す。終えるときに理由が書かれていれば
+/// 「理由: …」を添える。書かれていないものは、AI に「なぜやめたか」を推測させない。
 String closedGoalsDigest(
   Iterable<Goal> closedGoals, {
   int limit = kMaxClosedGoalsInDigest,
@@ -153,8 +153,14 @@ String closedGoalsDigest(
 
   return [
     for (final goal in sorted.take(limit))
-      '- 目標「${goal.title}」: ${_outcomeLabel(goal.status)}${_period(goal)}',
+      '- 目標「${goal.title}」: ${_outcomeLabel(goal.status)}${_period(goal)}'
+          '${_reason(goal)}',
   ].join('\n');
+}
+
+String _reason(Goal goal) {
+  final reason = goal.closeReason.trim();
+  return reason.isEmpty ? '' : '。理由: $reason';
 }
 
 String _outcomeLabel(GoalStatus status) => switch (status) {
