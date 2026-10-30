@@ -6,11 +6,13 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import '../core/auto_fill.dart';
 import '../core/daily_record.dart';
+import '../core/goal_digest.dart';
 import '../core/scroll.dart';
 import '../core/streak.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/detective_text_styles.dart';
 import '../models/record_field.dart';
+import '../models/goal.dart';
 import '../roles/roles.dart';
 import '../services/firestore_service.dart';
 import '../services/gemini_service.dart';
@@ -111,6 +113,8 @@ class _DiaryPageState extends State<DiaryPage> {
   // この日の表に並ぶ項目。聴取のあと、会話から値を読み取って埋める先になる
   List<RecordField> _rows = const [];
   List<String> _recentDiaries = const [];
+  // 追っている目標の直近の続き具合。質問が目標の実績を踏まえられるようにする。
+  String _goalContext = '';
 
   // 話題の候補。最初に一度だけ出させ、選ばれたものから外していく
   // （出来事を1つ話すたびに候補を出し直すと、そのたびに待たされるため）。
@@ -227,6 +231,18 @@ class _DiaryPageState extends State<DiaryPage> {
     _diaryContext = recordSummary(rows, record, diaryOnly: true);
     _recordHints = topicHintsFromRecord(rows, record);
     _rows = rows;
+    await _loadGoalContext(goals);
+  }
+
+  // 目標の続き具合を読む。質問の補助でしかないので、失敗しても聴取は止めない。
+  Future<void> _loadGoalContext(List<Goal> goals) async {
+    try {
+      final recent = await _firestore.getRecentRecords(_uid, 14);
+      _goalContext = activeGoalsDigest(goals, recent, DateTime.now());
+    } catch (e) {
+      debugPrint('目標の続き具合を読めなかった: $e');
+      _goalContext = '';
+    }
   }
 
   // ──────────────────────────────────────────────────────────────
@@ -392,6 +408,7 @@ class _DiaryPageState extends State<DiaryPage> {
       question = await _gemini!.generateTopicQuestion(
         topic: topic,
         recordContext: _recordContext,
+        goalContext: _goalContext,
       );
     } catch (e) {
       debugPrint('最初の質問を作れませんでした: $e');
@@ -433,6 +450,8 @@ class _DiaryPageState extends State<DiaryPage> {
     try {
       final result = await _gemini!.generateFollowUp(
         _interviewMessages(onlyTopic: topic),
+        recordContext: _recordContext,
+        goalContext: _goalContext,
       );
       if (!mounted) return;
       setState(() => _busy = false);

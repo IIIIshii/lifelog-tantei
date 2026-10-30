@@ -29,9 +29,13 @@ class DiaryPrompts {
         '二つの内容を自然に統合し、捜査ログとして再記録してください。';
   }
 
+  // 記録は「全部入れる材料」ではなく「出来事の話に関係するときだけ使う材料」として渡す。
+  // 全部入れさせると、睡眠時間のような数字が話の流れと無関係に付き、
+  // 日記が記録表の読み上げになる。
   static String _recordBlock(String recordContext) => recordContext.isEmpty
       ? ''
-      : '\n\n【日々の記録（日記に自然に織り込むこと）】\n$recordContext';
+      : '\n\n【日々の記録（出来事の話に関係する数字だけ自然に使い、関係しないものは書かない）】\n'
+          '$recordContext';
 
   // 話題の候補出しプロンプト。
   //
@@ -70,13 +74,35 @@ class DiaryPrompts {
   }
 
   // 出来事への最初の質問のプロンプト本文（隠し指示は呼び出し側で前に足す）。
+  // goalContext: 追っている目標の続き具合（goal_digest.dart の activeGoalsDigest）。
   static String buildTopicQuestionPrompt({
     required String topic,
     required String recordContext,
+    String goalContext = '',
   }) {
     final record = recordContext.isEmpty ? '' : '\n\n【今日の記録】\n$recordContext';
-    return '依頼人が話したい出来事：$topic$record';
+    return '依頼人が話したい出来事：$topic$record${_goalBlock(goalContext)}';
   }
+
+  // 深掘りの質問に添える参考情報。記録も目標も無ければ空文字。
+  //
+  // 深掘りの指示は「記録で分かる事実は聞き直さない」と書いているのに、
+  // 以前はこの質問に記録そのものが渡っていなかった。ここで合わせて渡す。
+  static String followUpContext({
+    String recordContext = '',
+    String goalContext = '',
+  }) {
+    final record = recordContext.isEmpty ? '' : '【今日の記録】\n$recordContext\n\n';
+    final goal = goalContext.isEmpty ? '' : '${_goalBlock(goalContext).trimLeft()}\n\n';
+    return '$record$goal';
+  }
+
+  // 目標の続き具合の節。質問に「責める」「急かす」材料として使わせないための注意を添える。
+  // 続かないことも、自己理解の手がかりとして中立に扱う。
+  static String _goalBlock(String goalContext) => goalContext.isEmpty
+      ? ''
+      : '\n\n【追っている目標と続き具合】\n$goalContext\n'
+            '（話に関係するときだけ触れる。続いていないことを責めたり、急かしたりしない）';
 
   // 話した内容を記録の表へ振り分けるプロンプト。
   //
@@ -109,18 +135,27 @@ class DiaryPrompts {
   // 直近期間の事件簿群を解析するプロンプトを組み立てる。
   // days は mergeDays の結果（(YYYY-MM-DD, {values, diary})）。日付順は問わない。
   // fields: 値のキー → 記録項目（fieldIndex の結果）。ここに無いキーの値は渡さない。
+  // statsBlock: PeriodSummary.toPromptBlock() の結果。平均や増減を AI に暗算させず、
+  //   コードで数えた値を渡すためのもの。空ならブロックごと省く。
   static String buildAnalysisPrompt(
     List<MapEntry<String, Map<String, dynamic>>> days, {
     Map<String, RecordField> fields = const {},
+    String statsBlock = '',
   }) {
     final sorted = [...days]..sort((a, b) => a.key.compareTo(b.key));
     final body = _formatDays(sorted, fields);
+    final stats = statsBlock.isEmpty ? '' : '$statsBlock\n\n';
+    final evidence = statsBlock.isEmpty
+        ? ''
+        : '数字は【集計】の値をそのまま使い、所見の根拠になった日付や値を添えること。\n';
 
     return '以下は依頼人の直近${sorted.length}日分の事件簿である。\n\n'
         '$body\n\n'
+        '$stats'
         '【依頼内容】\n'
         'この記録群を読み返し、以下3節で所見をまとめてください。各節は2〜4文、'
         '全体で400字以内に収めること。見出しは出力に含めること。\n'
+        '$evidence'
         '■所見（全体傾向）\n'
         '■気になる兆候（パターン・繰り返し・変化）\n'
         '■励まし（光っている取り組みへの一言）';
